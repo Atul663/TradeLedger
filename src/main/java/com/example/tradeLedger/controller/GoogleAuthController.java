@@ -32,7 +32,7 @@ public class GoogleAuthController {
 
         String url = "https://accounts.google.com/o/oauth2/v2/auth?" +
                 "client_id=" + CLIENT_ID +
-                "&redirect_uri=http://localhost:8080/oauth2/callback" +
+                "&redirect_uri=https://trade-ledger.onrender.com/oauth2/callback" +
                 "&response_type=code" +
                 "&scope=https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/userinfo.email" +
                 "&access_type=offline" +
