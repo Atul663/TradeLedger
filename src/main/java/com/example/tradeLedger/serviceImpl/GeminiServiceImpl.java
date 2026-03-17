@@ -8,7 +8,6 @@ import org.springframework.web.client.RestTemplate;
 
 @Service
 public class GeminiServiceImpl implements GeminiService {
-
     @Value("${gemini.api.key}")
     private String API_KEY;
 
