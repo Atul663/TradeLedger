@@ -22,6 +22,9 @@ public class GoogleAuthController {
 
     private final GoogleTokenService tokenService;
 
+    private final String REDIRECT_URL = "https://trade-ledger-n6ps.onrender.com/oauth2/callback";
+//    private final String REDIRECT_URL = "https://localhost:8080/oauth2/callback";
+
     public GoogleAuthController(GoogleTokenService tokenService) {
         this.tokenService = tokenService;
     }
@@ -32,7 +35,7 @@ public class GoogleAuthController {
 
         String url = "https://accounts.google.com/o/oauth2/v2/auth?" +
                 "client_id=" + CLIENT_ID +
-                "&redirect_uri=https://trade-ledger-n6ps.onrender.com/oauth2/callback" +
+                "&redirect_uri="+REDIRECT_URL +
                 "&response_type=code" +
                 "&scope=https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/userinfo.email" +
                 "&access_type=offline" +
@@ -53,8 +56,7 @@ public class GoogleAuthController {
                         CLIENT_ID,
                         CLIENT_SECRET,
                         code,
-//                        "http://localhost:8080/oauth2/callback"
-                        "https://trade-ledger-n6ps.onrender.com/oauth2/callback"
+                        REDIRECT_URL
                 ).execute();
 
         String accessToken = tokenResponse.getAccessToken();
