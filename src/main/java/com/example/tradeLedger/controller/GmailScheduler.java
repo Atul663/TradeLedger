@@ -3,6 +3,7 @@ package com.example.tradeLedger.controller;
 import com.example.tradeLedger.entity.GoogleToken;
 import com.example.tradeLedger.repository.GoogleTokenRepository;
 import com.example.tradeLedger.serviceImpl.GmailService;
+import com.example.tradeLedger.utils.CryptoUtil;
 import com.google.api.client.googleapis.auth.oauth2.GoogleRefreshTokenRequest;
 import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
 import com.google.api.client.json.gson.GsonFactory;
@@ -37,9 +38,7 @@ public class GmailScheduler {
 
         for (GoogleToken user : users) {
             try {
-                String refreshToken = user.getRefreshToken();
-
-                if (refreshToken == null) continue;
+                String refreshToken = CryptoUtil.decrypt(user.getRefreshToken());
 
                 String newAccessToken = new GoogleRefreshTokenRequest(
                         GoogleNetHttpTransport.newTrustedTransport(),
@@ -49,7 +48,7 @@ public class GmailScheduler {
                         CLIENT_SECRET
                 ).execute().getAccessToken();
 
-                user.setAccessToken(newAccessToken);
+                user.setAccessToken(CryptoUtil.encrypt(newAccessToken));
                 tokenRepository.save(user);
 
                 System.out.println("Refreshed token for: " + user.getEmail());

@@ -4,7 +4,9 @@ import com.example.tradeLedger.dto.ResponseDto;
 import com.example.tradeLedger.dto.TradesDTO;
 import com.example.tradeLedger.entity.Trades;
 import com.example.tradeLedger.service.TradesService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -20,8 +22,13 @@ public class TradesController {
     }
 
     @PostMapping("/saveTrade")
-    public ResponseEntity<ResponseDto> addTodayTrade(@RequestBody TradesDTO tradesDTO) {
-        return tradesService.addTodayTrade(tradesDTO);
+    public ResponseEntity<ResponseDto> addTodayTrade(
+            @RequestBody TradesDTO tradesDTO,
+            Authentication authentication) {
+
+        String email = (String) authentication.getPrincipal();
+
+        return tradesService.addTodayTrade(tradesDTO, email);
     }
 
     @PostMapping("/saveAllTrade")

@@ -1,38 +1,35 @@
 package com.example.tradeLedger.entity;
 
 import jakarta.persistence.*;
-import lombok.*;
 
 @Entity
-@Table(name = "google_tokens")
-
 public class GoogleToken {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-    @Column(unique = true)
-    private String email; // optional (can store later if needed)
 
-    @Column(length = 2000)
+    private String email;
+
+    @Column(columnDefinition = "TEXT")
     private String accessToken;
 
-    @Column(length = 2000)
+    @Column(columnDefinition = "TEXT")
     private String refreshToken;
 
-    private Long expiryTime; // optional
+    private boolean revoked = false;
 
-    private Long createdAt;
+    private long createdAt;
 
     public GoogleToken() {
     }
 
-    public GoogleToken(Long id, String email, String accessToken, String refreshToken, Long expiryTime, Long createdAt) {
+    public GoogleToken(Long id, String email, String accessToken, String refreshToken, boolean revoked, long createdAt) {
         this.id = id;
         this.email = email;
         this.accessToken = accessToken;
         this.refreshToken = refreshToken;
-        this.expiryTime = expiryTime;
+        this.revoked = revoked;
         this.createdAt = createdAt;
     }
 
@@ -68,19 +65,19 @@ public class GoogleToken {
         this.refreshToken = refreshToken;
     }
 
-    public Long getExpiryTime() {
-        return expiryTime;
+    public boolean isRevoked() {
+        return revoked;
     }
 
-    public void setExpiryTime(Long expiryTime) {
-        this.expiryTime = expiryTime;
+    public void setRevoked(boolean revoked) {
+        this.revoked = revoked;
     }
 
-    public Long getCreatedAt() {
+    public long getCreatedAt() {
         return createdAt;
     }
 
-    public void setCreatedAt(Long createdAt) {
+    public void setCreatedAt(long createdAt) {
         this.createdAt = createdAt;
     }
 }

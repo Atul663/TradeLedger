@@ -28,6 +28,9 @@ public class Trades {
     @Column(name = "no_of_trades")
     private Integer noOfTrades;
 
+    @Column(name = "email")
+    private String email;
+
     public Trades() {
     }
 
@@ -86,5 +89,13 @@ public class Trades {
 
     public void setNoOfTrades(Integer noOfTrades) {
         this.noOfTrades = noOfTrades;
+    }
+
+    public String getEmail() {
+        return email;
+    }
+
+    public void setEmail(String email) {
+        this.email = email;
     }
 }

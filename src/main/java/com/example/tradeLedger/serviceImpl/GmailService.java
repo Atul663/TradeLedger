@@ -1,6 +1,11 @@
 package com.example.tradeLedger.serviceImpl;
 
+import com.example.tradeLedger.entity.GoogleToken;
+import com.example.tradeLedger.repository.GoogleTokenRepository;
 import com.example.tradeLedger.service.PdfProcessingService;
+import com.example.tradeLedger.utils.CryptoUtil;
+import com.google.api.client.googleapis.auth.oauth2.GoogleRefreshTokenRequest;
+import com.google.api.client.googleapis.auth.oauth2.GoogleTokenResponse;
 import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
 import com.google.api.client.json.gson.GsonFactory;
 import com.google.api.client.auth.oauth2.Credential;
@@ -8,7 +13,9 @@ import com.google.api.client.auth.oauth2.BearerToken;
 import com.google.api.services.gmail.Gmail;
 import com.google.api.services.gmail.model.*;
 
+
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Files;
@@ -16,59 +23,53 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
-
 @Service
 public class GmailService {
 
     @Autowired
-    PdfProcessingService pdfProcessingService;
-    public Gmail getGmailService(String accessToken) throws Exception {
+    private GoogleTokenRepository tokenRepository;
 
-        Credential credential = new Credential.Builder(BearerToken.authorizationHeaderAccessMethod())
-                .setTransport(GoogleNetHttpTransport.newTrustedTransport())
-                .setJsonFactory(GsonFactory.getDefaultInstance())
-                .build()
-                .setAccessToken(accessToken);
+    @Autowired
+    private PdfProcessingService pdfProcessingService;
 
-        return new Gmail.Builder(
-                GoogleNetHttpTransport.newTrustedTransport(),
-                GsonFactory.getDefaultInstance(),
-                credential
-        ).setApplicationName("TradeLedger").build();
+    @Value("${google.client.id}")
+    private String CLIENT_ID;
+
+    @Value("${google.client.secret}")
+    private String CLIENT_SECRET;
+
+    // ✅ PUBLIC METHOD (used by controller)
+    public void readEmailsWithAttachments(String userEmail, String senderEmail) throws Exception {
+
+        GoogleToken token = tokenRepository.findByEmail(userEmail)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        String accessToken = getValidAccessToken(token);
+
+        try {
+            fetchEmailsWithAttachments(accessToken, senderEmail);
+
+        } catch (Exception e) {
+
+            System.out.println("Access token expired, refreshing...");
+
+            String newAccessToken = refreshAccessToken(CryptoUtil.decrypt(token.getRefreshToken()));
+
+            token.setAccessToken(CryptoUtil.encrypt(newAccessToken));
+            tokenRepository.save(token);
+
+            // 🔁 Retry once
+            fetchEmailsWithAttachments(newAccessToken, senderEmail);
+        }
     }
 
-    public List<String> readEmails(String accessToken) throws Exception {
+    // ✅ CORE LOGIC
+    private void fetchEmailsWithAttachments(String accessToken, String senderEmail) throws Exception {
 
         Gmail service = getGmailService(accessToken);
 
         ListMessagesResponse response = service.users().messages().list("me")
-                .setQ("atulprogramming2001@gmail.com") // 🔥 filter by domain
-                .execute();
-
-        List<String> emailSnippets = new ArrayList<>();
-
-        if (response.getMessages() == null) {
-            return emailSnippets;
-        }
-
-        for (Message msg : response.getMessages()) {
-
-            Message fullMessage = service.users().messages()
-                    .get("me", msg.getId())
-                    .execute();
-
-            emailSnippets.add(fullMessage.getSnippet());
-        }
-
-        return emailSnippets;
-    }
-
-    public void readEmailsWithAttachments(String accessToken, String email) throws Exception {
-
-        Gmail service = getGmailService(accessToken);
-
-        ListMessagesResponse response = service.users().messages().list("me")
-                .setQ("from:" + email +" has:attachment filename:pdf")
+                .setQ("from:" + senderEmail + " has:attachment filename:pdf")
                 .execute();
 
         if (response.getMessages() == null) {
@@ -100,8 +101,8 @@ public class GmailService {
 
                     byte[] fileBytes = Base64.getUrlDecoder().decode(attachPart.getData());
 
-                    // 🔥 SAVE TO DESKTOP
-                    String dirPath = "/Users/atulkumarsethi/Desktop/emails/";
+                    // ✅ Save file
+                    String dirPath = System.getProperty("user.home") + "/emails/";
                     Files.createDirectories(Paths.get(dirPath));
 
                     String filePath = dirPath + fileName;
@@ -112,14 +113,50 @@ public class GmailService {
 
                     System.out.println("Downloaded: " + fileName);
 
-                    // 🔥 PROCESS PDF
+                    // ✅ Process PDF
                     String password = "bjupn5708c";
-
                     String result = pdfProcessingService.processPdf(filePath, password);
 
                     System.out.println("Processed Data: " + result);
                 }
             }
         }
+    }
+
+    // ✅ TOKEN HANDLING
+    private String getValidAccessToken(GoogleToken token) {
+        String accessToken = CryptoUtil.decrypt(token.getAccessToken());
+        return accessToken; // future: expiry check
+    }
+
+    private String refreshAccessToken(String refreshToken) throws Exception {
+
+        GoogleTokenResponse response =
+                new GoogleRefreshTokenRequest(
+                        GoogleNetHttpTransport.newTrustedTransport(),
+                        GsonFactory.getDefaultInstance(),
+                        refreshToken,
+                        CLIENT_ID,
+                        CLIENT_SECRET
+                ).execute();
+
+        return response.getAccessToken();
+    }
+
+    // ✅ GMAIL CLIENT
+    private Gmail getGmailService(String accessToken) throws Exception {
+
+        Credential credential = new Credential.Builder(
+                BearerToken.authorizationHeaderAccessMethod())
+                .setTransport(GoogleNetHttpTransport.newTrustedTransport())
+                .setJsonFactory(GsonFactory.getDefaultInstance())
+                .build()
+                .setAccessToken(accessToken);
+
+        return new Gmail.Builder(
+                GoogleNetHttpTransport.newTrustedTransport(),
+                GsonFactory.getDefaultInstance(),
+                credential
+        ).setApplicationName("TradeLedger").build();
     }
 }

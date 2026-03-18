@@ -2,6 +2,7 @@ package com.example.tradeLedger.serviceImpl;
 
 import com.example.tradeLedger.entity.GoogleToken;
 import com.example.tradeLedger.repository.GoogleTokenRepository;
+import com.example.tradeLedger.utils.CryptoUtil;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -21,13 +22,16 @@ public class GoogleTokenService {
                 .orElse(new GoogleToken());
 
         token.setEmail(email);
-        token.setAccessToken(accessToken);
+
+        // 🔐 ENCRYPT BEFORE SAVING
+        token.setAccessToken(CryptoUtil.encrypt(accessToken));
 
         if (refreshToken != null) {
-            token.setRefreshToken(refreshToken);
+            token.setRefreshToken(CryptoUtil.encrypt(refreshToken));
         }
 
         token.setCreatedAt(System.currentTimeMillis());
 
         repository.save(token);
-    }}
+    }
+}
