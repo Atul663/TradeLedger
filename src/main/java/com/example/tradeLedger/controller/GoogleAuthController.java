@@ -46,8 +46,9 @@ public class GoogleAuthController {
 
     // 2️⃣ Callback API
     @GetMapping("/oauth2/callback")
-    public String callback(@RequestParam("code") String code) throws Exception {
+    public ResponseEntity<ResponseDto> callback(@RequestParam("code") String code) throws Exception {
 
+        ResponseDto response = new ResponseDto();
         GoogleTokenResponse tokenResponse =
                 new GoogleAuthorizationCodeTokenRequest(
                         GoogleNetHttpTransport.newTrustedTransport(),
@@ -66,9 +67,10 @@ public class GoogleAuthController {
         String email = getUserEmail(accessToken);
 
         // ✅ Save per user
-        tokenService.saveOrUpdateToken(email, accessToken, refreshToken);
+        GoogleToken tokenDetails = tokenService.saveOrUpdateToken(email, accessToken, refreshToken);
 
-        return "Login Successful & Token Saved!";
+        response.setData(tokenDetails);
+        return new ResponseEntity(tokenDetails, HttpStatus.OK);
     }
 
     private String getUserEmail(String accessToken) throws Exception {
