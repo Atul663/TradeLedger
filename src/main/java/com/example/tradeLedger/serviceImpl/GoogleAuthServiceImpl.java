@@ -34,8 +34,8 @@ public class GoogleAuthServiceImpl implements GoogleAuthService {
     @Value("${google.client.secret}")
     private String clientSecret;
 
-//    private static final String GOOGLE_CALLBACK_URL = "https://trade-ledger-n6ps.onrender.com/api/v1/auth/callback";
-    private static final String GOOGLE_CALLBACK_URL = "http://localhost:8080/api/v1/auth/callback";
+    private static final String GOOGLE_CALLBACK_URL = "https://trade-ledger-n6ps.onrender.com/api/v1/auth/callback";
+//    private static final String GOOGLE_CALLBACK_URL = "http://localhost:8080/api/v1/auth/callback";
     private static final String DEFAULT_FRONTEND_BASE_URL =
             "https://trade-pnl-analysis.vercel.app";
 
