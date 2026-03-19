@@ -41,7 +41,8 @@ public class GoogleAuthController {
 
     // ✅ LOGIN
     @GetMapping("/auth/google")
-    public void googleLogin(HttpServletResponse response) throws Exception {
+    public void googleLogin(@RequestParam("redirect") String redirect,
+                            HttpServletResponse response) throws Exception {
 
         String url = "https://accounts.google.com/o/oauth2/v2/auth?" +
                 "client_id=" + CLIENT_ID +
@@ -49,7 +50,8 @@ public class GoogleAuthController {
                 "&response_type=code" +
                 "&scope=https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/userinfo.email" +
                 "&access_type=offline" +
-                "&prompt=consent";
+                "&prompt=consent" +
+                "&state=" + redirect;   // 👈 pass frontend URL safely
 
         response.sendRedirect(url);
     }
@@ -57,6 +59,7 @@ public class GoogleAuthController {
     // ✅ CALLBACK
     @GetMapping("/oauth2/callback")
     public void callback(@RequestParam("code") String code,
+                         @RequestParam("state") String redirectUrl,
                          HttpServletResponse response) throws Exception {
 
         GoogleTokenResponse tokenResponse =
@@ -93,7 +96,7 @@ public class GoogleAuthController {
         response.addCookie(cookie);
 
         // ✅ IMPORTANT FIX → NO TOKEN IN URL
-        response.sendRedirect("https://trade-pnl-analysis.vercel.app/trades");
+        response.sendRedirect(redirectUrl + "/trades");
     }
 
     // ✅ GET CURRENT USER + ACCESS TOKEN
