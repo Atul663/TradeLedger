@@ -4,7 +4,7 @@ import com.example.tradeLedger.service.PdfProcessingService;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/pdf")
+@RequestMapping("/api/v1/pdf")
 public class PdfController {
 
     private final PdfProcessingService pdfProcessingService;

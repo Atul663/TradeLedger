@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 @RestController
-@RequestMapping("/trades")
+@RequestMapping("/api/v1/trades")
 public class TradesController {
 
     private final TradesService tradesService;
