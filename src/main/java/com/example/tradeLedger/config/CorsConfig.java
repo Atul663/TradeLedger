@@ -14,7 +14,10 @@ public class CorsConfig {
             public void addCorsMappings(CorsRegistry registry) {
 
                 registry.addMapping("/**")
-                        .allowedOrigins("https://trade-pnl-analysis.vercel.app")
+                        .allowedOrigins(
+                                "https://trade-pnl-analysis.vercel.app",
+                                "https://laughing-system-6vq4gq6rrggf4964-5173.app.github.dev"
+                        )
                         .allowedMethods("*")
                         .allowedHeaders("*")
                         .allowCredentials(true);
