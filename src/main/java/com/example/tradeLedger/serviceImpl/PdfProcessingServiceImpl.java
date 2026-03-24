@@ -108,6 +108,7 @@ public class PdfProcessingServiceImpl implements PdfProcessingService {
         }
 
         System.out.println("annexureList length" + annexureList.size());
+        System.out.println(obligationText);
         return objectMapper.writeValueAsString(result);
     }
 
@@ -124,33 +125,77 @@ public class PdfProcessingServiceImpl implements PdfProcessingService {
         ObligationDto dto = new ObligationDto();
 
         try {
+
+            System.out.println(text);
+
             String[] lines = text.split("\n");
 
-            for (String line : lines) {
-
+            for (int i = 0; i < lines.length; i++) {
+                String line = lines[i];
                 String normalized = normalize(line);
 
                 if (normalized.isEmpty()) continue;
 
-                // ✅ PAY IN / PAY OUT
-                if (normalized.contains("pay in") && normalized.contains("pay out")) {
-                    dto.setPayInPayOut(extractAmount(line));
+                System.out.println("Line " + i + ": [" + normalized + "]");
+
+                double currentAmount = extractAmount(line);
+                double nextAmount = 0.0;
+                if (i + 1 < lines.length) {
+                    nextAmount = extractAmount(lines[i + 1]);
                 }
 
-                // ✅ BROKERAGE
-                else if (normalized.startsWith("brokerage charges")) {
-                    dto.setBrokerage(extractAmount(line));
+                if ((normalized.contains("pay in") || normalized.contains("payin")) &&
+                        (normalized.contains("pay out") || normalized.contains("payout") ||
+                                normalized.contains("obligation"))) {
+
+                    double amount = currentAmount != 0.0 ? currentAmount : nextAmount;
+                    if (amount != 0.0) {
+                        dto.setPayInPayOut(amount);
+                        System.out.println("  ✅ Found Pay In/Out: " + amount);
+                    }
                 }
 
-                // ✅ NET AMOUNT
-                else if (normalized.contains("net amount")) {
-                    dto.setNetAmount(extractAmount(line));
+                else if (normalized.contains("brokerage charges") ||
+                        (normalized.equals("brokerage") && !normalized.contains("gst"))) {
+
+                    double amount = currentAmount != 0.0 ? currentAmount : nextAmount;
+                    if (amount != 0.0) {
+                        dto.setBrokerage(amount);
+                        System.out.println("  ✅ Found Brokerage: " + amount);
+                    }
                 }
 
-                else if (normalized.contains("transaction charges")) {
-                    dto.setTransactionCharge(extractAmount(line));
+                else if (normalized.contains("transaction charges") ||
+                        normalized.equals("transaction charges")) {
+
+                    double amount = currentAmount != 0.0 ? currentAmount : nextAmount;
+                    if (amount != 0.0) {
+                        dto.setTransactionCharges(amount);
+                        System.out.println("  ✅ Found Transaction Charges: " + amount);
+                    }
+                }
+
+                else if (normalized.contains("net obligation") || normalized.contains("net amount")) {
+
+                    double amount = currentAmount != 0.0 ? currentAmount : nextAmount;
+                    if (amount != 0.0) {
+                        dto.setNetAmount(amount);
+                        System.out.println("  ✅ Found Net Amount: " + amount);
+                    }
                 }
             }
+
+            //  Multiply all values by -1 at the end
+            dto.setPayInPayOut(dto.getPayInPayOut() * -1);
+            dto.setBrokerage(dto.getBrokerage() * -1);
+            dto.setTransactionCharges(dto.getTransactionCharges() * -1);
+            dto.setNetAmount(dto.getNetAmount() * -1);
+
+            System.out.println("\nFINAL EXTRACTED VALUES (after sign reversal):");
+            System.out.println("Pay In/Out: " + dto.getPayInPayOut());
+            System.out.println("Brokerage: " + dto.getBrokerage());
+            System.out.println("Transaction Charges: " + dto.getTransactionCharges());
+            System.out.println("Net Amount: " + dto.getNetAmount());
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -158,6 +203,7 @@ public class PdfProcessingServiceImpl implements PdfProcessingService {
 
         return dto;
     }
+
     private List<AnnexureDto> parseAnnexure(String text) {
 
         List<AnnexureDto> list = new ArrayList<>();
@@ -172,7 +218,7 @@ public class PdfProcessingServiceImpl implements PdfProcessingService {
 
                 if (line.isEmpty()) continue;
 
-                // 🔥 Skip headers & unwanted
+                //  Skip headers & unwanted
                 if (line.toLowerCase().contains("order")
                         || line.toLowerCase().contains("annexure")
                         || line.toLowerCase().contains("remarks")
@@ -369,7 +415,7 @@ public class PdfProcessingServiceImpl implements PdfProcessingService {
 
                     String text = (String) part.get("text");
 
-                    return text; // ✅ THIS IS YOUR CLEAN JSON
+                    return text;
                 }
             }
 

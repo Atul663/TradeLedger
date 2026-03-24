@@ -44,8 +44,8 @@ public class ObligationDto {
         this.netAmount = netAmount;
     }
 
-    public void setTransactionCharge(double transactionCharge) {
-        this.transactionCharges = transactionCharge;
+    public void setTransactionCharges(double transactionCharges) {
+        this.transactionCharges = transactionCharges;
     }
 
     public double getTransactionCharges(){
