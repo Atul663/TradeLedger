@@ -12,6 +12,9 @@ public interface PnlTradingDayRepository extends JpaRepository<PnlTradingDay, Lo
 
     List<PnlTradingDay> findByPlanMonth_IdOrderByTradingDaySeqAsc(Long planMonthId);
 
+    @EntityGraph(attributePaths = {"dailyFact"})
+    List<PnlTradingDay> findWithDailyFactByPlanMonth_IdOrderByTradingDaySeqAsc(Long planMonthId);
+
     Optional<PnlTradingDay> findByPlanMonth_IdAndTradeDate(Long planMonthId, LocalDate tradeDate);
 
     @EntityGraph(attributePaths = {"dailyFact", "planMonth"})
