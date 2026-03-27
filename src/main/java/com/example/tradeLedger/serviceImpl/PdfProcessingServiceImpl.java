@@ -35,8 +35,7 @@ public class PdfProcessingServiceImpl implements PdfProcessingService {
             DateTimeFormatter.ofPattern("d MMM uuuu", Locale.ENGLISH),
             DateTimeFormatter.ofPattern("d MMMM uuuu", Locale.ENGLISH),
             DateTimeFormatter.ofPattern("d/M/uu"),
-            DateTimeFormatter.ofPattern("d-M-uu")
-    );
+            DateTimeFormatter.ofPattern("d-M-uu"));
 
     private final PdfService pdfService;
     private final GeminiService geminiService;
@@ -47,8 +46,8 @@ public class PdfProcessingServiceImpl implements PdfProcessingService {
             .build();
 
     public PdfProcessingServiceImpl(PdfService pdfService,
-                                    GeminiService geminiService,
-                                    PnlLedgerService pnlLedgerService) {
+            GeminiService geminiService,
+            PnlLedgerService pnlLedgerService) {
         this.pdfService = pdfService;
         this.geminiService = geminiService;
         this.pnlLedgerService = pnlLedgerService;
@@ -60,7 +59,8 @@ public class PdfProcessingServiceImpl implements PdfProcessingService {
     }
 
     @Override
-    public String processPdf(String filePath, String password, UserDetails user, String gmailMessageId, String attachmentChecksum) throws Exception {
+    public String processPdf(String filePath, String password, UserDetails user, String gmailMessageId,
+            String attachmentChecksum) throws Exception {
 
         // 1️⃣ Extract full text
         String fullText = pdfService.extractText(filePath, password);
@@ -75,14 +75,14 @@ public class PdfProcessingServiceImpl implements PdfProcessingService {
         LocalDate tradeDate = extractTradeDate(fullText, filePath);
 
         // 🔥 4️⃣ Fallback to Gemini (ONLY if needed)
-//        if (annexureList.isEmpty()) {
-//            System.out.println("GEN AI IS USE");
-//            String aiResult = geminiService.extractData(fullText);
-//
-//            String cleanJson = extractJsonFromGeminiResponse(aiResult);
-//
-//            return cleanJson;
-//        }
+        // if (annexureList.isEmpty()) {
+        // System.out.println("GEN AI IS USE");
+        // String aiResult = geminiService.extractData(fullText);
+        //
+        // String cleanJson = extractJsonFromGeminiResponse(aiResult);
+        //
+        // return cleanJson;
+        // }
 
         // 🔥 5️⃣ Build response
         Map<String, Object> result = new LinkedHashMap<>();
@@ -93,7 +93,7 @@ public class PdfProcessingServiceImpl implements PdfProcessingService {
 
         String lowerPath = filePath.toLowerCase();
         String planType = "EQUITY";
-        if (lowerPath.contains("fno")) {
+        if (lowerPath.contains("fon")) {
             planType = "FNO";
         } else if (lowerPath.contains("stock")) {
             planType = "STOCK";
@@ -113,9 +113,7 @@ public class PdfProcessingServiceImpl implements PdfProcessingService {
                             annexureList.size(),
                             gmailMessageId,
                             attachmentChecksum,
-                            planType
-                    )
-            );
+                            planType));
         }
 
         System.out.println("annexureList length" + annexureList.size());
@@ -141,7 +139,8 @@ public class PdfProcessingServiceImpl implements PdfProcessingService {
 
                 String normalized = normalize(line);
 
-                if (normalized.isEmpty()) continue;
+                if (normalized.isEmpty())
+                    continue;
 
                 // ✅ PAY IN / PAY OUT
                 if (normalized.contains("pay in") && normalized.contains("pay out")) {
@@ -169,6 +168,7 @@ public class PdfProcessingServiceImpl implements PdfProcessingService {
 
         return dto;
     }
+
     private List<AnnexureDto> parseAnnexure(String text) {
 
         List<AnnexureDto> list = new ArrayList<>();
@@ -181,7 +181,8 @@ public class PdfProcessingServiceImpl implements PdfProcessingService {
 
                 line = line.trim();
 
-                if (line.isEmpty()) continue;
+                if (line.isEmpty())
+                    continue;
 
                 // 🔥 Skip headers & unwanted
                 if (line.toLowerCase().contains("order")
@@ -228,7 +229,8 @@ public class PdfProcessingServiceImpl implements PdfProcessingService {
                 }
             }
 
-            if (contractIndex == -1) return null;
+            if (contractIndex == -1)
+                return null;
 
             AnnexureDto dto = new AnnexureDto();
 
@@ -301,9 +303,10 @@ public class PdfProcessingServiceImpl implements PdfProcessingService {
 
     private LocalDate extractTradeDate(String fullText, String filePath) {
         List<Pattern> textPatterns = List.of(
-                Pattern.compile("(?i)(trade\\s*date|trading\\s*date|statement\\s*date|bill\\s*date|settlement\\s*date)\\s*[:\\-]?\\s*(\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4})"),
-                Pattern.compile("(?i)(trade\\s*date|trading\\s*date|statement\\s*date|bill\\s*date|settlement\\s*date)\\s*[:\\-]?\\s*(\\d{1,2}\\s+[A-Za-z]{3,9}\\s+\\d{2,4})")
-        );
+                Pattern.compile(
+                        "(?i)(trade\\s*date|trading\\s*date|statement\\s*date|bill\\s*date|settlement\\s*date)\\s*[:\\-]?\\s*(\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4})"),
+                Pattern.compile(
+                        "(?i)(trade\\s*date|trading\\s*date|statement\\s*date|bill\\s*date|settlement\\s*date)\\s*[:\\-]?\\s*(\\d{1,2}\\s+[A-Za-z]{3,9}\\s+\\d{2,4})"));
 
         for (Pattern pattern : textPatterns) {
             Matcher matcher = pattern.matcher(fullText);
@@ -318,8 +321,7 @@ public class PdfProcessingServiceImpl implements PdfProcessingService {
         String fileName = Paths.get(filePath).getFileName().toString();
         List<Pattern> fileNamePatterns = List.of(
                 Pattern.compile("(\\d{1,2}[._-]\\d{1,2}[._-]\\d{2,4})"),
-                Pattern.compile("(\\d{8})")
-        );
+                Pattern.compile("(\\d{8})"));
 
         for (Pattern pattern : fileNamePatterns) {
             Matcher matcher = pattern.matcher(fileName);
