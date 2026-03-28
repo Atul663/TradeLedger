@@ -218,15 +218,15 @@ public class GoogleAuthServiceImpl implements GoogleAuthService {
             baseUrl = resolveRedirectBaseUrl(state);
         }
 
-        if (baseUrl.endsWith("/trades")) {
+        if (baseUrl.endsWith("/create-plan")) {
             return baseUrl;
         }
 
         if (baseUrl.endsWith("/")) {
-            return baseUrl + "trades";
+            return baseUrl + "create-plan";
         }
 
-        return baseUrl + "/trades";
+        return baseUrl + "/create-plan";
     }
 
     private String resolveRedirectBaseUrl(String redirect) {
