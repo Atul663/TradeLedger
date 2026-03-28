@@ -38,6 +38,26 @@ public class PnlController {
         return execute(authentication, "Plans fetched successfully", pnlLedgerService::getPlans);
     }
 
+    @DeleteMapping("/plans")
+    public ResponseEntity<ResponseDto> deletePlan(
+            @RequestParam Long planId,
+            Authentication authentication
+    ) {
+        return execute(authentication, "Plan deleted successfully", user -> {
+            pnlLedgerService.deletePlan(user, planId);
+            return null;
+        });
+    }
+
+    @PatchMapping("/plans")
+    public ResponseEntity<ResponseDto> editPlan(
+            @RequestParam Long planId,
+            @RequestBody PnlPlanRequestDto request,
+            Authentication authentication
+    ) {
+        return execute(authentication, "Plan updated successfully", user -> pnlLedgerService.editPlan(user, planId, request));
+    }
+
     @GetMapping("/plans/active")
     public ResponseEntity<ResponseDto> getActivePlan(
             Authentication authentication,

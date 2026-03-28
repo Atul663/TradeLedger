@@ -230,6 +230,81 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
     }
 
     @Override
+    public void deletePlan(UserDetails user, Long planId) {
+        if (user == null || user.getId() == null) {
+            throw new IllegalArgumentException("User is required.");
+        }
+        if (planId == null) {
+            throw new IllegalArgumentException("Plan id is required.");
+        }
+
+        PnlPlan plan = pnlPlanRepository.findByIdAndUser_Id(planId, user.getId())
+                .orElseThrow(() -> new IllegalArgumentException("Plan not found."));
+
+        pnlPlanRepository.delete(plan);
+    }
+
+    @Override
+    public PnlPlanDto editPlan(UserDetails user, Long planId, PnlPlanRequestDto request) {
+        if (user == null || user.getId() == null) {
+            throw new IllegalArgumentException("User is required.");
+        }
+        if (planId == null) {
+            throw new IllegalArgumentException("Plan id is required.");
+        }
+        if (request == null) {
+            throw new IllegalArgumentException("Plan request is required.");
+        }
+
+        if (request.getStartDate() != null) {
+            throw new IllegalArgumentException("Cannot update startDate.");
+        }
+        if (request.getEndDate() != null) {
+            throw new IllegalArgumentException("Cannot update endDate.");
+        }
+        if (request.getAnnualTarget() != null) {
+            throw new IllegalArgumentException("Cannot update annualTarget.");
+        }
+        if (request.getPlanType() != null) {
+            throw new IllegalArgumentException("Cannot update planType.");
+        }
+        if (request.getStartingCapital() != null) {
+            throw new IllegalArgumentException("Cannot update startingCapital.");
+        }
+
+        PnlPlan plan = pnlPlanRepository.findByIdAndUser_Id(planId, user.getId())
+                .orElseThrow(() -> new IllegalArgumentException("Plan not found."));
+
+        boolean isModified = false;
+
+        if (request.getPlanName() != null && !request.getPlanName().isBlank()) {
+            plan.setPlanName(request.getPlanName().trim());
+            isModified = true;
+        }
+        if (request.getCurrency() != null && !request.getCurrency().isBlank()) {
+            plan.setCurrency(normalizeCurrency(request.getCurrency()));
+            isModified = true;
+        }
+        if (request.getActive() != null) {
+            boolean newActiveStatus = request.getActive();
+            if (newActiveStatus != plan.isActive()) {
+                if (newActiveStatus) {
+                    deactivateOtherPlans(user.getId(), plan.getId(), plan.getPlanType());
+                }
+                plan.setActive(newActiveStatus);
+                isModified = true;
+            }
+        }
+
+        if (isModified) {
+            plan.setUpdatedAt(LocalDateTime.now());
+            plan = pnlPlanRepository.save(plan);
+        }
+
+        return toPlanDto(plan, pnlPlanMonthRepository.findByPlan_IdOrderByMonthSequenceAsc(plan.getId()));
+    }
+
+    @Override
     @Transactional(Transactional.TxType.SUPPORTS)
     public PnlPlanDto getActivePlan(UserDetails user, LocalDate tradeDate, String planType) {
         PnlPlan plan = resolveActivePlan(user, defaultTradeDate(tradeDate), planType);

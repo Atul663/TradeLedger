@@ -30,6 +30,10 @@ public interface PnlLedgerService {
 
     List<PnlPlanDto> getPlans(UserDetails user);
 
+    void deletePlan(UserDetails user, Long planId);
+
+    PnlPlanDto editPlan(UserDetails user, Long planId, PnlPlanRequestDto request);
+
     PnlPlanDto getActivePlan(UserDetails user, LocalDate tradeDate, String planType);
 
     PnlPlanDto updateMonthTarget(UserDetails user, Long monthId, PnlMonthTargetUpdateDto request);

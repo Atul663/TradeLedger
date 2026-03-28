@@ -31,7 +31,7 @@ public class PnlDailyFact {
     @Column(name = "no_of_trades")
     private Integer noOfTrades;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.LAZY, cascade = CascadeType.ALL)
     @JoinColumn(name = "import_source_id")
     private PnlImportSource source;
 
