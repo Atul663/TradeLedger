@@ -22,4 +22,23 @@ public interface PnlDailyFactRepository extends JpaRepository<PnlDailyFact, Long
               and td.tradeDate < :beforeDate
             """)
     BigDecimal sumNetPnlByPlanIdBeforeDate(@Param("planId") Long planId, @Param("beforeDate") LocalDate beforeDate);
+
+    @Query("""
+            select coalesce(sum(df.netPnl), 0)
+            from PnlDailyFact df
+            join df.tradingDay td
+            join td.planMonth pm
+            where pm.plan.id = :planId
+            """)
+    BigDecimal sumNetPnlByPlanId(@Param("planId") Long planId);
+
+    @Query("""
+            select pm.plan.id, coalesce(sum(df.netPnl), 0)
+            from PnlDailyFact df
+            join df.tradingDay td
+            join td.planMonth pm
+            where pm.plan.user.id = :userId
+            group by pm.plan.id
+            """)
+    java.util.List<Object[]> sumNetPnlByPlanForUser(@Param("userId") Long userId);
 }

@@ -22,6 +22,7 @@ public class UserDetailsServiceImpl implements UserDetailsService {
                 .orElse(new UserDetails());
 
         token.setEmail(email);
+        token.setRevoked(false);
 
         // 🔐 ENCRYPT BEFORE SAVING
         token.setAccessToken(CryptoUtil.encrypt(accessToken));

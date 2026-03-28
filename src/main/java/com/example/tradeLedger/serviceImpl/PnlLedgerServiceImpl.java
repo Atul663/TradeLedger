@@ -2,6 +2,7 @@ package com.example.tradeLedger.serviceImpl;
 
 import com.example.tradeLedger.dto.ObligationDto;
 import com.example.tradeLedger.dto.PnlDailyCalculationDto;
+import com.example.tradeLedger.dto.PnlManualEntryRequestDto;
 import com.example.tradeLedger.dto.PnlMonthSummaryDto;
 import com.example.tradeLedger.dto.PnlMonthTargetUpdateDto;
 import com.example.tradeLedger.dto.PnlPlanDto;
@@ -42,6 +43,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
+
 @Service
 @Transactional
 public class PnlLedgerServiceImpl implements PnlLedgerService {
@@ -73,13 +75,15 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
     }
 
     @Override
+    @Transactional(Transactional.TxType.REQUIRES_NEW)
     public PnlProcessResultDto saveObligationAndCalculate(
             UserDetails user,
             LocalDate tradeDate,
             ObligationDto obligation,
             int numberOfTrades,
             String gmailMessageId,
-            String attachmentChecksum
+            String attachmentChecksum,
+            String planType
     ) {
         if (user == null || user.getId() == null) {
             throw new IllegalArgumentException("User is required for persistence.");
@@ -90,7 +94,7 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
 
         Optional<PnlImportSource> duplicateImport = findProcessedDuplicate(user.getId(), tradeDate, gmailMessageId, attachmentChecksum);
         if (duplicateImport.isPresent()) {
-            return buildProcessResult(user, tradeDate, duplicateImport.get(), true);
+            return buildProcessResult(user, tradeDate, duplicateImport.get(), true, planType);
         }
 
         PnlImportSource importSource = findReusableImport(user.getId(), tradeDate, gmailMessageId, attachmentChecksum)
@@ -106,13 +110,7 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
         importSource = pnlImportSourceRepository.save(importSource);
 
         try {
-            PnlPlan plan = pnlPlanRepository
-                    .findFirstByUser_IdAndActiveTrueAndStartDateLessThanEqualAndEndDateGreaterThanEqualOrderByStartDateDesc(
-                            user.getId(),
-                            tradeDate,
-                            tradeDate
-                    )
-                    .orElseThrow(() -> new IllegalStateException("No active P&L plan found for trade date " + tradeDate + "."));
+            PnlPlan plan = resolveActivePlan(user, tradeDate, planType);
 
             ensurePlanMonths(plan);
 
@@ -120,7 +118,7 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
                     .findFirstByPlan_IdAndStartDateLessThanEqualAndEndDateGreaterThanEqual(plan.getId(), tradeDate, tradeDate)
                     .orElseThrow(() -> new IllegalStateException("No plan month found for trade date " + tradeDate + "."));
 
-            ensureTradingDays(planMonth);
+            ensureTradingDaysForTradeDate(plan, planMonth, tradeDate);
 
             PnlTradingDay tradingDay = pnlTradingDayRepository.findByPlanMonth_IdAndTradeDate(planMonth.getId(), tradeDate)
                     .orElseThrow(() -> new IllegalStateException("No trading day row found for trade date " + tradeDate + "."));
@@ -142,7 +140,7 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
             importSource.setProcessedAt(LocalDateTime.now());
             pnlImportSourceRepository.save(importSource);
 
-            return buildProcessResult(user, tradeDate, importSource, false);
+            return buildProcessResult(user, tradeDate, importSource, false, planType);
         } catch (RuntimeException ex) {
             importSource.setStatus("FAILED");
             importSource.setErrorMessage(ex.getMessage());
@@ -185,7 +183,7 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
 
         boolean active = request.getActive() == null || request.getActive();
         if (active) {
-            deactivateOtherPlans(user.getId(), plan.getId());
+            deactivateOtherPlans(user.getId(), plan.getId(), plan.getPlanType());
         }
 
         plan.setUser(user);
@@ -196,33 +194,45 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
         plan.setCurrency(normalizeCurrency(request.getCurrency()));
         plan.setActive(active);
         plan.setUpdatedAt(LocalDateTime.now());
-
+        plan.setPlanType(request.getPlanType() != null && !request.getPlanType().isBlank() ? request.getPlanType() : "FNO");
+        plan.setStartingCapital(scale(request.getStartingCapital()));
+        plan.setTotalAchievedAmount(ZERO);
         plan = pnlPlanRepository.save(plan);
-        ensurePlanMonths(plan);
-        recalculateMonthlyTargetsForPlan(plan, plan.getStartDate());
 
-        generateMonthlyStructureForPlan(plan, determineSeedDate(plan));
+        deactivateOtherPlans(user.getId(), plan.getId(), plan.getPlanType());
+
+        ensurePlanMonths(plan);
+        recalculateMonthlyTargetsForPlan(plan, determineTargetAllocationDate(plan));
+        provisionInitialTradingStructure(plan);
 
         return toPlanDto(plan, pnlPlanMonthRepository.findByPlan_IdOrderByMonthSequenceAsc(plan.getId()));
     }
 
     @Override
+    @Transactional(Transactional.TxType.SUPPORTS)
     public List<PnlPlanDto> getPlans(UserDetails user) {
         if (user == null || user.getId() == null) {
             throw new IllegalArgumentException("User is required.");
         }
 
         List<PnlPlan> plans = pnlPlanRepository.findByUser_IdOrderByStartDateDesc(user.getId());
+        List<PnlPlanMonth> allMonths = pnlPlanMonthRepository.findByPlan_User_IdOrderByPlan_IdAscMonthSequenceAsc(user.getId());
+        Map<Long, List<PnlPlanMonth>> monthsByPlanId = new LinkedHashMap<>();
+        for (PnlPlanMonth month : allMonths) {
+            monthsByPlanId.computeIfAbsent(month.getPlan().getId(), ignored -> new ArrayList<>()).add(month);
+        }
+
         List<PnlPlanDto> planDtos = new ArrayList<>();
         for (PnlPlan plan : plans) {
-            planDtos.add(toPlanDto(plan, pnlPlanMonthRepository.findByPlan_IdOrderByMonthSequenceAsc(plan.getId())));
+            planDtos.add(toPlanDto(plan, monthsByPlanId.getOrDefault(plan.getId(), List.of())));
         }
         return planDtos;
     }
 
     @Override
-    public PnlPlanDto getActivePlan(UserDetails user, LocalDate tradeDate) {
-        PnlPlan plan = resolveActivePlan(user, defaultTradeDate(tradeDate));
+    @Transactional(Transactional.TxType.SUPPORTS)
+    public PnlPlanDto getActivePlan(UserDetails user, LocalDate tradeDate, String planType) {
+        PnlPlan plan = resolveActivePlan(user, defaultTradeDate(tradeDate), planType);
         return toPlanDto(plan, pnlPlanMonthRepository.findByPlan_IdOrderByMonthSequenceAsc(plan.getId()));
     }
 
@@ -249,9 +259,61 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
     }
 
     @Override
-    public PnlWorkbookViewDto getWorkbookView(UserDetails user, LocalDate tradeDate) {
+    public PnlProcessResultDto upsertManualDailyPnl(UserDetails user, PnlManualEntryRequestDto request) {
+        if (user == null || user.getId() == null) {
+            throw new IllegalArgumentException("User is required.");
+        }
+        if (request == null) {
+            throw new IllegalArgumentException("Manual daily PnL request is required.");
+        }
+        if (request.getSelectedPlan() == null) {
+            throw new IllegalArgumentException("Selected plan is required.");
+        }
+        if (request.getPnlAmount() == null) {
+            throw new IllegalArgumentException("PnL amount is required.");
+        }
+
+        LocalDate effectiveTradeDate = defaultTradeDate(request.getTradeDate());
+        PnlPlan plan = pnlPlanRepository.findByIdAndUser_Id(request.getSelectedPlan(), user.getId())
+                .orElseThrow(() -> new IllegalArgumentException("Selected plan not found."));
+        if (effectiveTradeDate.isBefore(plan.getStartDate()) || effectiveTradeDate.isAfter(plan.getEndDate())) {
+            throw new IllegalArgumentException("Trade date is outside the selected plan period.");
+        }
+        PnlPlanMonth planMonth = findPlanMonthOrCreate(plan, effectiveTradeDate);
+        ensureTradingDaysForTradeDate(plan, planMonth, effectiveTradeDate);
+
+        PnlTradingDay tradingDay = pnlTradingDayRepository.findByPlanMonth_IdAndTradeDate(planMonth.getId(), effectiveTradeDate)
+                .orElseThrow(() -> new IllegalStateException("No trading day row found for trade date " + effectiveTradeDate + "."));
+
+        PnlDailyFact dailyFact = pnlDailyFactRepository.findByTradingDay_Id(tradingDay.getId())
+                .orElseGet(PnlDailyFact::new);
+
+        dailyFact.setTradingDay(tradingDay);
+        dailyFact.setSource(null);
+        dailyFact.setPayInPayOut(null);
+        dailyFact.setBrokerage(null);
+        dailyFact.setTransactionCharges(request.getTransactionCharges() != null ? scale(request.getTransactionCharges()) : null);
+        dailyFact.setNetPnl(scale(request.getPnlAmount()));
+        dailyFact.setNoOfTrades(null);
+        dailyFact.setExtractedAt(LocalDateTime.now());
+        pnlDailyFactRepository.save(dailyFact);
+
+        tradingDay.setRemark(normalizeRemark(request.getRemarks()));
+        tradingDay.setUpdatedAt(LocalDateTime.now());
+        pnlTradingDayRepository.save(tradingDay);
+
+        plan.setTotalAchievedAmount(pnlDailyFactRepository.sumNetPnlByPlanId(plan.getId()));
+        pnlPlanRepository.save(plan);
+
+        syncStoredDailyTargets(plan, planMonth);
+        return buildManualProcessResult(plan, planMonth, effectiveTradeDate);
+    }
+
+    @Override
+    @Transactional(Transactional.TxType.SUPPORTS)
+    public PnlWorkbookViewDto getWorkbookView(UserDetails user, LocalDate tradeDate, String planType) {
         LocalDate effectiveTradeDate = defaultTradeDate(tradeDate);
-        PnlPlan plan = resolveActivePlan(user, effectiveTradeDate);
+        PnlPlan plan = resolveActivePlan(user, effectiveTradeDate, planType);
         List<PnlPlanMonth> months = pnlPlanMonthRepository.findByPlan_IdOrderByMonthSequenceAsc(plan.getId());
         PnlPlanMonth currentMonth = findPlanMonth(plan.getId(), effectiveTradeDate);
         List<PnlMonthSummaryDto> yearSummary = buildYearSummary(plan, months, groupTradingDaysByMonth(plan.getId(), months));
@@ -270,9 +332,10 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
     }
 
     @Override
-    public PnlMonthSummaryDto getCurrentMonthSummary(UserDetails user, LocalDate tradeDate) {
+    @Transactional(Transactional.TxType.SUPPORTS)
+    public PnlMonthSummaryDto getCurrentMonthSummary(UserDetails user, LocalDate tradeDate, String planType) {
         LocalDate effectiveTradeDate = defaultTradeDate(tradeDate);
-        PnlPlan plan = resolveActivePlan(user, effectiveTradeDate);
+        PnlPlan plan = resolveActivePlan(user, effectiveTradeDate, planType);
         List<PnlPlanMonth> months = pnlPlanMonthRepository.findByPlan_IdOrderByMonthSequenceAsc(plan.getId());
         PnlPlanMonth currentMonth = findPlanMonth(plan.getId(), effectiveTradeDate);
         List<PnlMonthSummaryDto> yearSummary = buildYearSummary(plan, months, groupTradingDaysByMonth(plan.getId(), months));
@@ -284,20 +347,22 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
     }
 
     @Override
-    public List<PnlMonthSummaryDto> getYearSummary(UserDetails user, LocalDate tradeDate) {
+    @Transactional(Transactional.TxType.SUPPORTS)
+    public List<PnlMonthSummaryDto> getYearSummary(UserDetails user, LocalDate tradeDate, String planType) {
         LocalDate effectiveTradeDate = defaultTradeDate(tradeDate);
-        PnlPlan plan = resolveActivePlan(user, effectiveTradeDate);
+        PnlPlan plan = resolveActivePlan(user, effectiveTradeDate, planType);
         List<PnlPlanMonth> months = pnlPlanMonthRepository.findByPlan_IdOrderByMonthSequenceAsc(plan.getId());
         return buildYearSummary(plan, months, groupTradingDaysByMonth(plan.getId(), months));
     }
 
     @Override
-    public List<PnlDailyCalculationDto> getMonthSheet(UserDetails user, LocalDate tradeDate) {
+    @Transactional(Transactional.TxType.SUPPORTS)
+    public List<PnlDailyCalculationDto> getMonthSheet(UserDetails user, LocalDate tradeDate, String planType) {
         LocalDate effectiveTradeDate = defaultTradeDate(tradeDate);
-        PnlPlan plan = resolveActivePlan(user, effectiveTradeDate);
+        PnlPlan plan = resolveActivePlan(user, effectiveTradeDate, planType);
         PnlPlanMonth currentMonth = findPlanMonth(plan.getId(), effectiveTradeDate);
 
-        ensureTradingDays(currentMonth);
+        ensureTradingDaysForTradeDate(plan, currentMonth, effectiveTradeDate);
 
         List<PnlPlanMonth> months = pnlPlanMonthRepository.findByPlan_IdOrderByMonthSequenceAsc(plan.getId());
         Map<Long, List<PnlTradingDay>> monthTradingDays = groupTradingDaysByMonth(plan.getId(), months);
@@ -316,6 +381,14 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
             ensurePlanMonths(plan);
             generateMonthlyStructureForPlan(plan, effectiveTradeDate);
         }
+    }
+
+    @Override
+    public void ensureMonthlyStructure(UserDetails user, LocalDate tradeDate, String planType) {
+        LocalDate effectiveTradeDate = defaultTradeDate(tradeDate);
+        PnlPlan plan = resolveActivePlan(user, effectiveTradeDate, planType);
+        ensurePlanMonths(plan);
+        generateMonthlyStructureForPlan(plan, effectiveTradeDate);
     }
 
     @Override
@@ -349,13 +422,13 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
         return Optional.empty();
     }
 
-    private void deactivateOtherPlans(Long userId, Long currentPlanId) {
+    private void deactivateOtherPlans(Long userId, Long currentPlanId, String planType) {
         List<PnlPlan> plans = pnlPlanRepository.findByUser_IdOrderByStartDateDesc(userId);
         for (PnlPlan existingPlan : plans) {
             if (currentPlanId != null && currentPlanId.equals(existingPlan.getId())) {
                 continue;
             }
-            if (existingPlan.isActive()) {
+            if (existingPlan.isActive() && planType.equals(existingPlan.getPlanType())) {
                 existingPlan.setActive(false);
                 existingPlan.setUpdatedAt(LocalDateTime.now());
             }
@@ -467,20 +540,18 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
                 .findFirstByPlan_IdAndStartDateLessThanEqualAndEndDateGreaterThanEqual(plan.getId(), tradeDate, tradeDate)
                 .orElseThrow(() -> new IllegalStateException("No plan month found for trade date " + tradeDate + "."));
 
-        ensureTradingDays(month);
+        ensureTradingDaysForTradeDate(plan, month, tradeDate);
         syncStoredDailyTargets(plan, month);
     }
 
     private void syncStoredDailyTargets(PnlPlan plan, PnlPlanMonth currentMonth) {
-        List<PnlPlanMonth> months = pnlPlanMonthRepository.findByPlan_IdOrderByMonthSequenceAsc(plan.getId());
-        Map<Long, List<PnlTradingDay>> monthTradingDays = groupTradingDaysByMonth(plan.getId(), months);
-        List<PnlTradingDay> tradingDays = monthTradingDays.getOrDefault(currentMonth.getId(), List.of());
+        List<PnlTradingDay> tradingDays = pnlTradingDayRepository
+                .findWithDailyFactByPlanMonth_IdOrderByTradingDaySeqAsc(currentMonth.getId());
         if (tradingDays.isEmpty()) {
             return;
         }
 
-        List<PnlMonthSummaryDto> yearSummary = buildYearSummary(plan, months, monthTradingDays);
-        persistDailyPlans(currentMonth, tradingDays, yearSummary);
+        persistDailyPlans(currentMonth, tradingDays, effectiveStoredMonthTarget(currentMonth));
     }
 
     private void recalculateMonthlyTargetsForPlan(PnlPlan plan, LocalDate allocationDate) {
@@ -539,7 +610,7 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
                 int tradingWeight = monthWeights.getOrDefault(month.getId(), 0);
                 if (tradingWeight <= 0 || totalVariableWeight == 0) {
                     newAllocatedTarget = ZERO;
-                } else if (month.getId().equals(lastVariableMonth.getId())) {
+                } else if (lastVariableMonth != null && month.getId().equals(lastVariableMonth.getId())) {
                     newAllocatedTarget = scale(remainingForVariableMonths.subtract(allocatedSoFar));
                 } else {
                     newAllocatedTarget = scale(
@@ -564,10 +635,87 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
         }
     }
 
-    private void ensureTradingDays(PnlPlanMonth planMonth) {
-        List<LocalDate> tradingDates = resolveTradingDates(planMonth.getStartDate(), planMonth.getEndDate());
+    private void provisionInitialTradingStructure(PnlPlan plan) {
+        LocalDate today = LocalDate.now();
+        if (plan.getEndDate().isBefore(today)) {
+            LocalDate previousMonthDate = today.minusMonths(1).withDayOfMonth(1);
+            if (!previousMonthDate.isBefore(plan.getStartDate()) && !previousMonthDate.isAfter(plan.getEndDate())) {
+                generateMonthlyStructureForPlan(plan, previousMonthDate);
+            }
+            return;
+        }
+
+        if (plan.getStartDate().isBefore(today.withDayOfMonth(1))) {
+            LocalDate previousMonthDate = today.minusMonths(1).withDayOfMonth(1);
+            if (!previousMonthDate.isBefore(plan.getStartDate()) && !previousMonthDate.isAfter(plan.getEndDate())) {
+                generatePreviousMonthStructure(plan, previousMonthDate);
+            }
+        }
+
+        LocalDate seedDate = determineSeedDate(plan);
+        generateMonthlyStructureForPlan(plan, seedDate);
+    }
+
+    private void generatePreviousMonthStructure(PnlPlan plan, LocalDate anyDateInPreviousMonth) {
+        PnlPlanMonth previousMonth = pnlPlanMonthRepository
+                .findFirstByPlan_IdAndStartDateLessThanEqualAndEndDateGreaterThanEqual(
+                        plan.getId(),
+                        anyDateInPreviousMonth,
+                        anyDateInPreviousMonth
+                )
+                .orElse(null);
+        if (previousMonth == null) {
+            return;
+        }
+        ensureTradingDaysInRange(previousMonth, previousMonth.getStartDate(), previousMonth.getEndDate());
+        syncStoredDailyTargets(plan, previousMonth);
+    }
+
+    private void ensureTradingDaysForTradeDate(PnlPlan plan, PnlPlanMonth planMonth, LocalDate tradeDate) {
+        LocalDate today = LocalDate.now();
+        if (planMonth.getEndDate().isBefore(today.withDayOfMonth(1))) {
+            ensureTradingDaysInRange(planMonth, planMonth.getStartDate(), planMonth.getEndDate());
+            return;
+        }
+
+        LocalDate anchorDate = resolveCurrentWindowEndDate(planMonth, tradeDate);
+        ensureTradingDaysInRange(planMonth, planMonth.getStartDate(), anchorDate);
+    }
+
+    private LocalDate resolveCurrentWindowEndDate(PnlPlanMonth planMonth, LocalDate tradeDate) {
+        LocalDate today = LocalDate.now();
+        LocalDate referenceDate = tradeDate;
+        if (isSameMonth(planMonth.getStartDate(), today)) {
+            referenceDate = tradeDate.isBefore(today) ? today : tradeDate;
+        }
+
+        LocalDate windowStart = max(planMonth.getStartDate(), referenceDate);
+        List<LocalDate> upcomingTradingDates = resolveTradingDates(windowStart, planMonth.getEndDate());
+        if (upcomingTradingDates.isEmpty()) {
+            return min(planMonth.getEndDate(), referenceDate);
+        }
+        if (upcomingTradingDates.size() == 1) {
+            return upcomingTradingDates.get(0);
+        }
+        return upcomingTradingDates.get(1);
+    }
+
+    private void ensureTradingDaysInRange(PnlPlanMonth planMonth, LocalDate fromDate, LocalDate toDate) {
+        LocalDate effectiveFrom = max(planMonth.getStartDate(), fromDate);
+        LocalDate effectiveTo = min(planMonth.getEndDate(), toDate);
+        if (effectiveFrom.isAfter(effectiveTo)) {
+            return;
+        }
+
+        List<LocalDate> fullMonthTradingDates = resolveTradingDates(planMonth.getStartDate(), planMonth.getEndDate());
+        List<LocalDate> tradingDates = new ArrayList<>();
+        for (LocalDate tradeDate : fullMonthTradingDates) {
+            if (!tradeDate.isBefore(effectiveFrom) && !tradeDate.isAfter(effectiveTo)) {
+                tradingDates.add(tradeDate);
+            }
+        }
         if (tradingDates.isEmpty()) {
-            throw new IllegalStateException("No trading dates found for month " + planMonth.getMonthLabel() + ".");
+            return;
         }
 
         List<PnlTradingDay> existingDays = pnlTradingDayRepository.findByPlanMonth_IdOrderByTradingDaySeqAsc(planMonth.getId());
@@ -577,10 +725,10 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
         }
 
         List<PnlTradingDay> daysToSave = new ArrayList<>();
-        for (int i = 0; i < tradingDates.size(); i++) {
-            LocalDate tradeDate = tradingDates.get(i);
+        for (LocalDate tradeDate : tradingDates) {
             PnlTradingDay tradingDay = existingByDate.getOrDefault(tradeDate, new PnlTradingDay());
             boolean changed = tradingDay.getId() == null;
+            int tradingDaySequence = fullMonthTradingDates.indexOf(tradeDate) + 1;
 
             if (tradingDay.getPlanMonth() == null || !planMonth.getId().equals(tradingDay.getPlanMonth().getId())) {
                 tradingDay.setPlanMonth(planMonth);
@@ -590,8 +738,8 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
                 tradingDay.setTradeDate(tradeDate);
                 changed = true;
             }
-            if (!Integer.valueOf(i + 1).equals(tradingDay.getTradingDaySeq())) {
-                tradingDay.setTradingDaySeq(i + 1);
+            if (!Integer.valueOf(tradingDaySequence).equals(tradingDay.getTradingDaySeq())) {
+                tradingDay.setTradingDaySeq(tradingDaySequence);
                 changed = true;
             }
             if (tradingDay.getCreatedAt() == null) {
@@ -602,12 +750,6 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
                 tradingDay.setUpdatedAt(LocalDateTime.now());
                 daysToSave.add(tradingDay);
             }
-        }
-
-        if (!Integer.valueOf(tradingDates.size()).equals(planMonth.getTradingDaysPlanned())) {
-            planMonth.setTradingDaysPlanned(tradingDates.size());
-            planMonth.setUpdatedAt(LocalDateTime.now());
-            pnlPlanMonthRepository.save(planMonth);
         }
 
         if (!daysToSave.isEmpty()) {
@@ -643,11 +785,11 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
         return resolveTradingDates(startDate, endDate).size();
     }
 
-    private PnlProcessResultDto buildProcessResult(UserDetails user, LocalDate tradeDate, PnlImportSource importSource, boolean duplicate) {
-        PnlPlan plan = resolveActivePlan(user, tradeDate);
+    private PnlProcessResultDto buildProcessResult(UserDetails user, LocalDate tradeDate, PnlImportSource importSource, boolean duplicate, String planType) {
+        PnlPlan plan = resolveActivePlan(user, tradeDate, planType);
 
         PnlPlanMonth currentMonth = findPlanMonth(plan.getId(), tradeDate);
-        ensureTradingDays(currentMonth);
+        ensureTradingDaysForTradeDate(plan, currentMonth, tradeDate);
         syncStoredDailyTargets(plan, currentMonth);
 
         List<PnlPlanMonth> months = pnlPlanMonthRepository.findByPlan_IdOrderByMonthSequenceAsc(plan.getId());
@@ -674,24 +816,71 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
         return result;
     }
 
-    private PnlPlan resolveActivePlan(UserDetails user, LocalDate tradeDate) {
+    private PnlProcessResultDto buildManualProcessResult(PnlPlan plan, PnlPlanMonth currentMonth, LocalDate tradeDate) {
+        List<PnlTradingDay> currentMonthTradingDays = pnlTradingDayRepository
+                .findWithDailyFactByPlanMonth_IdOrderByTradingDaySeqAsc(currentMonth.getId());
+
+        BigDecimal monthTarget = effectiveStoredMonthTarget(currentMonth);
+        BigDecimal monthAchieved = calculateMonthAchieved(currentMonthTradingDays);
+        BigDecimal achievedBeforeMonth = scale(
+                pnlDailyFactRepository.sumNetPnlByPlanIdBeforeDate(plan.getId(), currentMonth.getStartDate())
+        );
+
+        PnlMonthSummaryDto currentMonthSummary = new PnlMonthSummaryDto();
+        currentMonthSummary.setMonthSequence(currentMonth.getMonthSequence());
+        currentMonthSummary.setMonthLabel(currentMonth.getMonthLabel());
+        currentMonthSummary.setTradingDaysPlanned(currentMonth.getTradingDaysPlanned());
+        currentMonthSummary.setMonthTarget(monthTarget);
+        currentMonthSummary.setMonthAchieved(monthAchieved);
+        currentMonthSummary.setMonthBalance(scale(monthTarget.subtract(monthAchieved)));
+        currentMonthSummary.setMonthAchievedPct(percentage(monthAchieved, monthTarget));
+        currentMonthSummary.setYtdAchieved(scale(achievedBeforeMonth.add(monthAchieved)));
+        currentMonthSummary.setYtdBalance(scale(scale(plan.getAnnualTarget()).subtract(currentMonthSummary.getYtdAchieved())));
+
+        List<PnlDailyCalculationDto> dailySheet = buildDailySheet(currentMonth, currentMonthTradingDays, monthTarget);
+
+        PnlProcessResultDto result = new PnlProcessResultDto();
+        result.setPersisted(true);
+        result.setDuplicateImport(false);
+        result.setPlanName(plan.getPlanName());
+        result.setMonthLabel(currentMonth.getMonthLabel());
+        result.setTradeDate(tradeDate);
+        result.setImportSourceId(null);
+        result.setCurrentMonthSummary(currentMonthSummary);
+        result.setYearSummary(null);
+        result.setDailySheet(dailySheet);
+        return result;
+    }
+
+    private PnlPlan resolveActivePlan(UserDetails user, LocalDate tradeDate, String providedType) {
         if (user == null || user.getId() == null) {
             throw new IllegalArgumentException("User is required.");
         }
+        final String planType = (providedType == null || providedType.isBlank()) ? "FNO" : providedType;
 
         return pnlPlanRepository
-                .findFirstByUser_IdAndActiveTrueAndStartDateLessThanEqualAndEndDateGreaterThanEqualOrderByStartDateDesc(
+                .findFirstByUser_IdAndPlanTypeAndActiveTrueAndStartDateLessThanEqualAndEndDateGreaterThanEqualOrderByStartDateDesc(
                         user.getId(),
+                        planType,
                         tradeDate,
                         tradeDate
                 )
-                .orElseThrow(() -> new IllegalStateException("No active P&L plan found for trade date " + tradeDate + "."));
+                .orElseThrow(() -> new IllegalStateException("No active P&L plan found for trade date " + tradeDate + " and plan type " + planType + "."));
     }
 
     private PnlPlanMonth findPlanMonth(Long planId, LocalDate tradeDate) {
         return pnlPlanMonthRepository
                 .findFirstByPlan_IdAndStartDateLessThanEqualAndEndDateGreaterThanEqual(planId, tradeDate, tradeDate)
                 .orElseThrow(() -> new IllegalStateException("No plan month found for trade date " + tradeDate + "."));
+    }
+
+    private PnlPlanMonth findPlanMonthOrCreate(PnlPlan plan, LocalDate tradeDate) {
+        try {
+            return findPlanMonth(plan.getId(), tradeDate);
+        } catch (IllegalStateException ex) {
+            ensurePlanMonths(plan);
+            return findPlanMonth(plan.getId(), tradeDate);
+        }
     }
 
     private Map<Long, List<PnlTradingDay>> groupTradingDaysByMonth(Long planId, List<PnlPlanMonth> months) {
@@ -834,10 +1023,81 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
         return dailySheet;
     }
 
+    private List<PnlDailyCalculationDto> buildDailySheet(
+            PnlPlanMonth currentMonth,
+            List<PnlTradingDay> tradingDays,
+            BigDecimal monthTarget
+    ) {
+        if (tradingDays == null) {
+            return List.of();
+        }
+
+        List<PnlTradingDay> sortedTradingDays = new ArrayList<>(tradingDays);
+        sortedTradingDays.sort(Comparator.comparing(PnlTradingDay::getTradingDaySeq));
+
+        BigDecimal achievedBeforeDay = ZERO;
+        BigDecimal achievedToDate = ZERO;
+        int pendingTradingDays = 0;
+        List<PnlDailyCalculationDto> dailySheet = new ArrayList<>();
+
+        for (PnlTradingDay tradingDay : sortedTradingDays) {
+            BigDecimal actualPnl = tradingDay.getDailyFact() != null ? scale(tradingDay.getDailyFact().getNetPnl()) : null;
+            int remainingTradingDays = currentMonth.getTradingDaysPlanned() - tradingDay.getTradingDaySeq() + 1;
+            BigDecimal storedDailyPlan = tradingDay.getDailyTarget() != null ? scale(tradingDay.getDailyTarget()) : null;
+
+            PnlDailyCalculationDto dailyCalculation = new PnlDailyCalculationDto();
+            dailyCalculation.setTradeDate(tradingDay.getTradeDate());
+            dailyCalculation.setTradingDaySequence(tradingDay.getTradingDaySeq());
+            dailyCalculation.setRemainingTradingDays(remainingTradingDays);
+            dailyCalculation.setActualPnl(actualPnl);
+            dailyCalculation.setRemark(tradingDay.getRemark());
+
+            if (actualPnl != null) {
+                BigDecimal dailyPlan = storedDailyPlan != null
+                        ? storedDailyPlan
+                        : historicalDailyPlan(monthTarget, currentMonth.getTradingDaysPlanned(), tradingDay.getTradingDaySeq(), achievedBeforeDay);
+                dailyCalculation.setDailyPlan(dailyPlan);
+                BigDecimal mtdAchieved = scale(achievedBeforeDay.add(actualPnl));
+                dailyCalculation.setMtdAchieved(mtdAchieved);
+                dailyCalculation.setYtaMonth(scale(monthTarget.subtract(mtdAchieved)));
+                dailyCalculation.setMtdPct(percentage(mtdAchieved, monthTarget));
+                if (dailyPlan != null) {
+                    dailyCalculation.setXtraShortfall(scale(actualPnl.subtract(dailyPlan)));
+                }
+                achievedBeforeDay = mtdAchieved;
+                achievedToDate = mtdAchieved;
+            } else {
+                pendingTradingDays++;
+                dailyCalculation.setDailyPlan(storedDailyPlan);
+                dailyCalculation.setMtdAchieved(null);
+                dailyCalculation.setYtaMonth(null);
+                dailyCalculation.setMtdPct(null);
+                dailyCalculation.setXtraShortfall(null);
+            }
+
+            dailySheet.add(dailyCalculation);
+        }
+
+        BigDecimal pendingDailyPlan = divide(
+                scale(monthTarget.subtract(achievedToDate)),
+                pendingTradingDays,
+                2
+        );
+        if (pendingTradingDays > 0) {
+            for (PnlDailyCalculationDto dailyCalculation : dailySheet) {
+                if (dailyCalculation.getActualPnl() == null && dailyCalculation.getDailyPlan() == null) {
+                    dailyCalculation.setDailyPlan(pendingDailyPlan);
+                }
+            }
+        }
+
+        return dailySheet;
+    }
+
     private void persistDailyPlans(
             PnlPlanMonth currentMonth,
             List<PnlTradingDay> tradingDays,
-            List<PnlMonthSummaryDto> yearSummary
+            BigDecimal monthTarget
     ) {
         if (tradingDays == null || tradingDays.isEmpty()) {
             return;
@@ -845,11 +1105,6 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
 
         List<PnlTradingDay> sortedTradingDays = new ArrayList<>(tradingDays);
         sortedTradingDays.sort(Comparator.comparing(PnlTradingDay::getTradingDaySeq));
-
-        PnlMonthSummaryDto currentMonthSummary = yearSummary.stream()
-                .filter(summary -> summary.getMonthSequence().equals(currentMonth.getMonthSequence()))
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException("Current month summary could not be calculated."));
 
         BigDecimal achievedBeforeDay = ZERO;
         BigDecimal achievedToDate = ZERO;
@@ -860,7 +1115,7 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
             BigDecimal actualPnl = tradingDay.getDailyFact() != null ? scale(tradingDay.getDailyFact().getNetPnl()) : null;
             if (actualPnl != null) {
                 BigDecimal dailyPlan = historicalDailyPlan(
-                        currentMonthSummary.getMonthTarget(),
+                        monthTarget,
                         currentMonth.getTradingDaysPlanned(),
                         tradingDay.getTradingDaySeq(),
                         achievedBeforeDay
@@ -874,7 +1129,7 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
         }
 
         BigDecimal pendingDailyPlan = divide(
-                scale(currentMonthSummary.getMonthTarget().subtract(achievedToDate)),
+                scale(monthTarget.subtract(achievedToDate)),
                 pendingDays.size(),
                 2
         );
@@ -965,6 +1220,10 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
         dto.setAnnualTarget(scale(plan.getAnnualTarget()));
         dto.setCurrency(plan.getCurrency());
         dto.setActive(plan.isActive());
+        dto.setPlanType(plan.getPlanType());
+        dto.setStartingCapital(scale(plan.getStartingCapital()));
+        dto.setTotalAchievedAmount(scale(plan.getTotalAchievedAmount()));
+        dto.setCurrentCapital(scale(plan.getStartingCapital().add(plan.getTotalAchievedAmount())));
         dto.setMonths(toPlanMonthDtos(months));
         return dto;
     }
@@ -993,6 +1252,13 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
         return currency.trim().toUpperCase(Locale.ENGLISH);
     }
 
+    private String normalizeRemark(String remark) {
+        if (remark == null || remark.isBlank()) {
+            return null;
+        }
+        return remark.trim();
+    }
+
     private LocalDate defaultTradeDate(LocalDate tradeDate) {
         return tradeDate != null ? tradeDate : LocalDate.now();
     }
@@ -1016,6 +1282,10 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
         return first.isBefore(second) ? first : second;
     }
 
+    private boolean isSameMonth(LocalDate first, LocalDate second) {
+        return first.getYear() == second.getYear() && first.getMonth() == second.getMonth();
+    }
+
     private BigDecimal effectiveMonthTarget(
             PnlPlan plan,
             PnlPlanMonth month,
@@ -1029,5 +1299,15 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
             return scale(month.getManualTarget());
         }
         return divide(scale(plan.getAnnualTarget()).subtract(achievedBeforeMonth), remainingMonths, 2);
+    }
+
+    private BigDecimal effectiveStoredMonthTarget(PnlPlanMonth month) {
+        if (month.getAllocatedTarget() != null) {
+            return scale(month.getAllocatedTarget());
+        }
+        if (month.getManualTarget() != null) {
+            return scale(month.getManualTarget());
+        }
+        return ZERO;
     }
 }

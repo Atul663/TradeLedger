@@ -10,11 +10,11 @@ import java.util.List;
 
 public interface PnlDashboardService {
 
-    PnlWorkbookViewDto getWorkbookView(UserDetails user, LocalDate tradeDate);
+    PnlWorkbookViewDto getWorkbookView(UserDetails user, LocalDate tradeDate, String planType);
 
-    PnlMonthSummaryDto getCurrentMonthSummary(UserDetails user, LocalDate tradeDate);
+    PnlMonthSummaryDto getCurrentMonthSummary(UserDetails user, LocalDate tradeDate, String planType);
 
-    List<PnlMonthSummaryDto> getYearSummary(UserDetails user, LocalDate tradeDate);
+    List<PnlMonthSummaryDto> getYearSummary(UserDetails user, LocalDate tradeDate, String planType);
 
-    List<PnlDailyCalculationDto> getMonthSheet(UserDetails user, LocalDate tradeDate);
+    List<PnlDailyCalculationDto> getMonthSheet(UserDetails user, LocalDate tradeDate, String planType);
 }

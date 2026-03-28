@@ -2,6 +2,7 @@ package com.example.tradeLedger.service;
 
 import com.example.tradeLedger.dto.ObligationDto;
 import com.example.tradeLedger.dto.PnlDailyCalculationDto;
+import com.example.tradeLedger.dto.PnlManualEntryRequestDto;
 import com.example.tradeLedger.dto.PnlMonthSummaryDto;
 import com.example.tradeLedger.dto.PnlMonthTargetUpdateDto;
 import com.example.tradeLedger.dto.PnlPlanDto;
@@ -21,26 +22,31 @@ public interface PnlLedgerService {
             ObligationDto obligation,
             int numberOfTrades,
             String gmailMessageId,
-            String attachmentChecksum
+            String attachmentChecksum,
+            String planType
     );
 
     PnlPlanDto savePlan(UserDetails user, PnlPlanRequestDto request);
 
     List<PnlPlanDto> getPlans(UserDetails user);
 
-    PnlPlanDto getActivePlan(UserDetails user, LocalDate tradeDate);
+    PnlPlanDto getActivePlan(UserDetails user, LocalDate tradeDate, String planType);
 
     PnlPlanDto updateMonthTarget(UserDetails user, Long monthId, PnlMonthTargetUpdateDto request);
 
-    PnlWorkbookViewDto getWorkbookView(UserDetails user, LocalDate tradeDate);
+    PnlProcessResultDto upsertManualDailyPnl(UserDetails user, PnlManualEntryRequestDto request);
 
-    PnlMonthSummaryDto getCurrentMonthSummary(UserDetails user, LocalDate tradeDate);
+    PnlWorkbookViewDto getWorkbookView(UserDetails user, LocalDate tradeDate, String planType);
 
-    List<PnlMonthSummaryDto> getYearSummary(UserDetails user, LocalDate tradeDate);
+    PnlMonthSummaryDto getCurrentMonthSummary(UserDetails user, LocalDate tradeDate, String planType);
 
-    List<PnlDailyCalculationDto> getMonthSheet(UserDetails user, LocalDate tradeDate);
+    List<PnlMonthSummaryDto> getYearSummary(UserDetails user, LocalDate tradeDate, String planType);
+
+    List<PnlDailyCalculationDto> getMonthSheet(UserDetails user, LocalDate tradeDate, String planType);
 
     void generateMonthlyStructure(LocalDate tradeDate);
+
+    void ensureMonthlyStructure(UserDetails user, LocalDate tradeDate, String planType);
 
     void recalculateMonthlyTargets(LocalDate tradeDate);
 }

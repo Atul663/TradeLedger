@@ -12,6 +12,7 @@ import com.example.tradeLedger.entity.UserDetails;
 import com.example.tradeLedger.repository.PnlDashboardRepository;
 import com.example.tradeLedger.service.PnlDashboardService;
 import com.example.tradeLedger.service.PnlLedgerService;
+import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -20,10 +21,10 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 @Service
+@Transactional(Transactional.TxType.SUPPORTS)
 public class PnlDashboardServiceImpl implements PnlDashboardService {
 
     private static final BigDecimal ZERO = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
@@ -37,9 +38,9 @@ public class PnlDashboardServiceImpl implements PnlDashboardService {
     }
 
     @Override
-    public PnlWorkbookViewDto getWorkbookView(UserDetails user, LocalDate tradeDate) {
+    public PnlWorkbookViewDto getWorkbookView(UserDetails user, LocalDate tradeDate, String planType) {
         LocalDate effectiveTradeDate = defaultTradeDate(tradeDate);
-        PnlPlan plan = pnlDashboardRepository.findActivePlan(user, effectiveTradeDate);
+        PnlPlan plan = pnlDashboardRepository.findActivePlan(user, effectiveTradeDate, planType);
         List<PnlPlanMonth> months = pnlDashboardRepository.findPlanMonths(plan.getId());
         PnlPlanMonth currentMonth = pnlDashboardRepository.findPlanMonth(plan.getId(), effectiveTradeDate);
         List<PnlMonthSummaryDto> yearSummary = buildYearSummary(
@@ -57,9 +58,9 @@ public class PnlDashboardServiceImpl implements PnlDashboardService {
     }
 
     @Override
-    public PnlMonthSummaryDto getCurrentMonthSummary(UserDetails user, LocalDate tradeDate) {
+    public PnlMonthSummaryDto getCurrentMonthSummary(UserDetails user, LocalDate tradeDate, String planType) {
         LocalDate effectiveTradeDate = defaultTradeDate(tradeDate);
-        PnlPlan plan = pnlDashboardRepository.findActivePlan(user, effectiveTradeDate);
+        PnlPlan plan = pnlDashboardRepository.findActivePlan(user, effectiveTradeDate, planType);
         List<PnlPlanMonth> months = pnlDashboardRepository.findPlanMonths(plan.getId());
         PnlPlanMonth currentMonth = pnlDashboardRepository.findPlanMonth(plan.getId(), effectiveTradeDate);
         List<PnlMonthSummaryDto> yearSummary = buildYearSummary(
@@ -72,18 +73,18 @@ public class PnlDashboardServiceImpl implements PnlDashboardService {
     }
 
     @Override
-    public List<PnlMonthSummaryDto> getYearSummary(UserDetails user, LocalDate tradeDate) {
+    public List<PnlMonthSummaryDto> getYearSummary(UserDetails user, LocalDate tradeDate, String planType) {
         LocalDate effectiveTradeDate = defaultTradeDate(tradeDate);
-        PnlPlan plan = pnlDashboardRepository.findActivePlan(user, effectiveTradeDate);
+        PnlPlan plan = pnlDashboardRepository.findActivePlan(user, effectiveTradeDate, planType);
         List<PnlPlanMonth> months = pnlDashboardRepository.findPlanMonths(plan.getId());
         return buildYearSummary(plan, months, pnlDashboardRepository.findTradingDaysGroupedByMonth(plan.getId(), months));
     }
 
     @Override
-    public List<PnlDailyCalculationDto> getMonthSheet(UserDetails user, LocalDate tradeDate) {
+    public List<PnlDailyCalculationDto> getMonthSheet(UserDetails user, LocalDate tradeDate, String planType) {
         LocalDate effectiveTradeDate = defaultTradeDate(tradeDate);
-        PnlPlan plan = pnlDashboardRepository.findActivePlan(user, effectiveTradeDate);
-        pnlLedgerService.generateMonthlyStructure(effectiveTradeDate);
+        PnlPlan plan = pnlDashboardRepository.findActivePlan(user, effectiveTradeDate, planType);
+        pnlLedgerService.ensureMonthlyStructure(user, effectiveTradeDate, planType);
 
         List<PnlPlanMonth> months = pnlDashboardRepository.findPlanMonths(plan.getId());
         PnlPlanMonth currentMonth = pnlDashboardRepository.findPlanMonth(plan.getId(), effectiveTradeDate);
@@ -247,6 +248,10 @@ public class PnlDashboardServiceImpl implements PnlDashboardService {
         dto.setAnnualTarget(scale(plan.getAnnualTarget()));
         dto.setCurrency(plan.getCurrency());
         dto.setActive(plan.isActive());
+        dto.setPlanType(plan.getPlanType());
+        dto.setStartingCapital(scale(plan.getStartingCapital()));
+        dto.setTotalAchievedAmount(scale(plan.getTotalAchievedAmount()));
+        dto.setCurrentCapital(scale(plan.getStartingCapital().add(plan.getTotalAchievedAmount())));
         dto.setMonths(toPlanMonthDtos(months));
         return dto;
     }

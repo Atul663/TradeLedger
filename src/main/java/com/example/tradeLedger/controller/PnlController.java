@@ -1,6 +1,7 @@
 package com.example.tradeLedger.controller;
 
 import com.example.tradeLedger.constant.ApplicationConstants;
+import com.example.tradeLedger.dto.PnlManualEntryRequestDto;
 import com.example.tradeLedger.dto.PnlMonthTargetUpdateDto;
 import com.example.tradeLedger.dto.PnlPlanRequestDto;
 import com.example.tradeLedger.dto.ResponseDto;
@@ -40,9 +41,10 @@ public class PnlController {
     @GetMapping("/plans/active")
     public ResponseEntity<ResponseDto> getActivePlan(
             Authentication authentication,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate tradeDate
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate tradeDate,
+            @RequestParam(required = false, defaultValue = "FNO") String planType
     ) {
-        return execute(authentication, "Active plan fetched successfully", user -> pnlLedgerService.getActivePlan(user, tradeDate));
+        return execute(authentication, "Active plan fetched successfully", user -> pnlLedgerService.getActivePlan(user, tradeDate, planType));
     }
 
     @PatchMapping("/plans/months/{monthId}/manual-target")
@@ -52,6 +54,14 @@ public class PnlController {
             Authentication authentication
     ) {
         return execute(authentication, "Month target updated successfully", user -> pnlLedgerService.updateMonthTarget(user, monthId, request));
+    }
+
+    @PostMapping("/daily/manual-entry")
+    public ResponseEntity<ResponseDto> upsertManualDailyPnl(
+            @RequestBody PnlManualEntryRequestDto request,
+            Authentication authentication
+    ) {
+        return execute(authentication, "Daily PnL saved successfully", user -> pnlLedgerService.upsertManualDailyPnl(user, request));
     }
 
     private ResponseEntity<ResponseDto> execute(

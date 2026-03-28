@@ -12,6 +12,8 @@ public class PnlPlanRequestDto {
     private BigDecimal annualTarget;
     private String currency;
     private Boolean active;
+    private String planType;
+    private BigDecimal startingCapital;
 
     public Long getId() {
         return id;
@@ -67,5 +69,21 @@ public class PnlPlanRequestDto {
 
     public void setActive(Boolean active) {
         this.active = active;
+    }
+
+    public String getPlanType() {
+        return planType;
+    }
+
+    public void setPlanType(String planType) {
+        this.planType = planType;
+    }
+
+    public BigDecimal getStartingCapital() {
+        return startingCapital;
+    }
+
+    public void setStartingCapital(BigDecimal startingCapital) {
+        this.startingCapital = startingCapital;
     }
 }

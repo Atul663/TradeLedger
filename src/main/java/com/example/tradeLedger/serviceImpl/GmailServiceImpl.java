@@ -1,6 +1,8 @@
 package com.example.tradeLedger.serviceImpl;
 
+import com.example.tradeLedger.entity.PnlPlan;
 import com.example.tradeLedger.entity.UserDetails;
+import com.example.tradeLedger.repository.PnlPlanRepository;
 import com.example.tradeLedger.repository.UserDetailsRepository;
 import com.example.tradeLedger.service.GmailService;
 import com.example.tradeLedger.service.PdfProcessingService;
@@ -20,12 +22,18 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.Base64;
+import java.util.Collections;
+import java.util.Optional;
 
 @Service
 public class GmailServiceImpl implements GmailService {
 
     private final UserDetailsRepository userDetailsRepository;
+    private final PnlPlanRepository pnlPlanRepository;
 
     private final PdfProcessingService pdfProcessingService;
 
@@ -36,8 +44,10 @@ public class GmailServiceImpl implements GmailService {
     private String CLIENT_SECRET;
 
     public GmailServiceImpl(UserDetailsRepository userDetailsRepository,
+                            PnlPlanRepository pnlPlanRepository,
                             PdfProcessingService pdfProcessingService) {
         this.userDetailsRepository = userDetailsRepository;
+        this.pnlPlanRepository = pnlPlanRepository;
         this.pdfProcessingService = pdfProcessingService;
     }
 
@@ -83,9 +93,15 @@ public class GmailServiceImpl implements GmailService {
     private void fetchEmailsWithAttachments(String accessToken, String senderEmail, UserDetails userDetails) throws Exception {
 
         Gmail service = getGmailService(accessToken);
+        Optional<PnlPlan> activePlan = findActivePlan(userDetails.getId());
+
+        if (activePlan.isEmpty()) {
+            System.out.println("Skipping Gmail import because no active P&L plan exists for user {" + userDetails.getEmail() + "}");
+            return;
+        }
 
         ListMessagesResponse response = service.users().messages().list("me")
-                .setQ("from:" + senderEmail + " has:attachment filename:pdf")
+                .setQ("from:" + senderEmail + " has:attachment filename:pdf is:unread")
                 .execute();
 
         if (response.getMessages() == null) {
@@ -99,9 +115,23 @@ public class GmailServiceImpl implements GmailService {
                     .get("me", msg.getId())
                     .execute();
 
+            LocalDate mailReceivedDate = Instant.ofEpochMilli(message.getInternalDate())
+                    .atZone(ZoneId.systemDefault())
+                    .toLocalDate();
+
+            if (activePlan.isPresent() && !isWithinPlanRange(mailReceivedDate, activePlan.get())) {
+                System.out.println("Skipping mail " + msg.getId() + " because received date " + mailReceivedDate
+                        + " is outside active plan range.");
+                markMessageAsRead(service, msg.getId());
+                continue;
+            }
+
             MessagePart payload = message.getPayload();
 
             if (payload.getParts() == null) continue;
+
+            boolean processedSuccessfully = false;
+            boolean processingFailed = false;
 
             for (MessagePart part : payload.getParts()) {
 
@@ -139,10 +169,16 @@ public class GmailServiceImpl implements GmailService {
                         );
 
                         System.out.println("Processed Data: " + result);
+                        processedSuccessfully = true;
                     } catch (Exception processingException) {
+                        processingFailed = true;
                         System.out.println("Failed to process attachment " + fileName + ": " + processingException.getMessage());
                     }
                 }
+            }
+
+            if (processedSuccessfully && !processingFailed) {
+                markMessageAsRead(service, msg.getId());
             }
         }
     }
@@ -196,5 +232,25 @@ public class GmailServiceImpl implements GmailService {
         } catch (NoSuchAlgorithmException ex) {
             throw new IllegalStateException("SHA-256 is not available in this runtime.", ex);
         }
+    }
+
+    private void markMessageAsRead(Gmail service, String messageId) throws Exception {
+        ModifyMessageRequest request = new ModifyMessageRequest()
+                .setRemoveLabelIds(Collections.singletonList("UNREAD"));
+        service.users().messages().modify("me", messageId, request).execute();
+    }
+
+    private Optional<PnlPlan> findActivePlan(Long userId) {
+        if (userId == null) {
+            return Optional.empty();
+        }
+
+        return pnlPlanRepository.findByUser_IdOrderByStartDateDesc(userId).stream()
+                .filter(PnlPlan::isActive)
+                .findFirst();
+    }
+
+    private boolean isWithinPlanRange(LocalDate mailReceivedDate, PnlPlan plan) {
+        return !mailReceivedDate.isBefore(plan.getStartDate()) && !mailReceivedDate.isAfter(plan.getEndDate());
     }
 }

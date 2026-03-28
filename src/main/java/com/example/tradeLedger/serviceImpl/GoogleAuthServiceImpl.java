@@ -113,7 +113,8 @@ public class GoogleAuthServiceImpl implements GoogleAuthService {
             String accessToken = JwtUtil.generateAccessToken(email);
             return ResponseEntity.ok(Map.of(
                     "email", email,
-                    "accessToken", accessToken
+                    "accessToken", accessToken,
+                    "hasPanCard", hasPanCard(userDetails)
             ));
         } catch (Exception e) {
             return ResponseEntity.status(401).body("Invalid token");
@@ -261,5 +262,9 @@ public class GoogleAuthServiceImpl implements GoogleAuthService {
         }
 
         return url;
+    }
+
+    private boolean hasPanCard(UserDetails userDetails) {
+        return userDetails.getPanCard() != null && !userDetails.getPanCard().isBlank();
     }
 }

@@ -14,6 +14,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class GmailSchedulerServiceImpl implements GmailSchedulerService {
@@ -45,38 +48,55 @@ public class GmailSchedulerServiceImpl implements GmailSchedulerService {
             return;
         }
 
+        ExecutorService executor = Executors.newFixedThreadPool(5);
+
         for (UserDetails user : users) {
-            try {
-                if (user.isRevoked()) {
-                    continue;
+            executor.submit(() -> {
+                try {
+                    if (user.isRevoked()) {
+                        return; // Instead of continue inside lambda
+                    }
+
+                    if (user.getRefreshToken() == null) {
+                        log.warn("No refresh token for user: {}", user.getEmail());
+                        return;
+                    }
+
+                    String refreshToken = CryptoUtil.decrypt(user.getRefreshToken());
+                    String newAccessToken = new GoogleRefreshTokenRequest(
+                            GoogleNetHttpTransport.newTrustedTransport(),
+                            GsonFactory.getDefaultInstance(),
+                            refreshToken,
+                            clientId,
+                            clientSecret
+                    ).execute().getAccessToken();
+
+                    user.setAccessToken(CryptoUtil.encrypt(newAccessToken));
+                    userDetailsRepository.save(user);
+
+                    gmailService.readEmailsWithAttachments(
+                            user.getEmail(),
+                            "atulprogramming2001@gmail.com"
+                    );
+
+                    log.info("Successfully processed user: {}", user.getEmail());
+                } catch (Exception e) {
+                    log.error("Error processing user: {}", user.getEmail(), e);
                 }
+            });
+        }
 
-                if (user.getRefreshToken() == null) {
-                    log.warn("No refresh token for user: {}", user.getEmail());
-                    continue;
-                }
-
-                String refreshToken = CryptoUtil.decrypt(user.getRefreshToken());
-                String newAccessToken = new GoogleRefreshTokenRequest(
-                        GoogleNetHttpTransport.newTrustedTransport(),
-                        GsonFactory.getDefaultInstance(),
-                        refreshToken,
-                        clientId,
-                        clientSecret
-                ).execute().getAccessToken();
-
-                user.setAccessToken(CryptoUtil.encrypt(newAccessToken));
-                userDetailsRepository.save(user);
-
-                gmailService.readEmailsWithAttachments(
-                        user.getEmail(),
-                        "atulprogramming2001@gmail.com"
-                );
-
-                log.info("Successfully processed user: {}", user.getEmail());
-            } catch (Exception e) {
-                log.error("Error processing user: {}", user.getEmail(), e);
+        executor.shutdown();
+        try {
+            // Give threads a maximum of 30 minutes to finish processing PDFs
+            if (!executor.awaitTermination(30, TimeUnit.MINUTES)) {
+                log.warn("Scheduler timed out waiting for all users to process");
+                executor.shutdownNow();
             }
+        } catch (InterruptedException e) {
+            log.error("Email processing interrupted", e);
+            executor.shutdownNow();
+            Thread.currentThread().interrupt();
         }
 
         log.info("Scheduler finished");

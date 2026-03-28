@@ -31,33 +31,37 @@ public class PnlDashboardController {
     @GetMapping
     public ResponseEntity<ResponseDto> getDashboard(
             Authentication authentication,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate tradeDate
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate tradeDate,
+            @RequestParam(required = false, defaultValue = "FNO") String planType
     ) {
-        return execute(authentication, "Dashboard fetched successfully", user -> pnlDashboardService.getWorkbookView(user, tradeDate));
+        return execute(authentication, "Dashboard fetched successfully", user -> pnlDashboardService.getWorkbookView(user, tradeDate, planType));
     }
 
     @GetMapping("/current-month-summary")
     public ResponseEntity<ResponseDto> getCurrentMonthSummary(
             Authentication authentication,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate tradeDate
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate tradeDate,
+            @RequestParam(required = false, defaultValue = "FNO") String planType
     ) {
-        return execute(authentication, "Current month summary fetched successfully", user -> pnlDashboardService.getCurrentMonthSummary(user, tradeDate));
+        return execute(authentication, "Current month summary fetched successfully", user -> pnlDashboardService.getCurrentMonthSummary(user, tradeDate, planType));
     }
 
     @GetMapping("/year-summary")
     public ResponseEntity<ResponseDto> getYearSummary(
             Authentication authentication,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate tradeDate
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate tradeDate,
+            @RequestParam(required = false, defaultValue = "FNO") String planType
     ) {
-        return execute(authentication, "Year summary fetched successfully", user -> pnlDashboardService.getYearSummary(user, tradeDate));
+        return execute(authentication, "Year summary fetched successfully", user -> pnlDashboardService.getYearSummary(user, tradeDate, planType));
     }
 
     @GetMapping("/month-sheet")
     public ResponseEntity<ResponseDto> getMonthSheet(
             Authentication authentication,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate tradeDate
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate tradeDate,
+            @RequestParam(required = false, defaultValue = "FNO") String planType
     ) {
-        return execute(authentication, "Month sheet fetched successfully", user -> pnlDashboardService.getMonthSheet(user, tradeDate));
+        return execute(authentication, "Month sheet fetched successfully", user -> pnlDashboardService.getMonthSheet(user, tradeDate, planType));
     }
 
     private ResponseEntity<ResponseDto> execute(

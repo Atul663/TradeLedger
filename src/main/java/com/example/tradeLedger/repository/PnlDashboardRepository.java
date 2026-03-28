@@ -29,14 +29,16 @@ public class PnlDashboardRepository {
         this.pnlTradingDayRepository = pnlTradingDayRepository;
     }
 
-    public PnlPlan findActivePlan(UserDetails user, LocalDate tradeDate) {
+    public PnlPlan findActivePlan(UserDetails user, LocalDate tradeDate, String providedType) {
         if (user == null || user.getId() == null) {
             throw new IllegalArgumentException("User is required.");
         }
+        final String planType = (providedType == null || providedType.isBlank()) ? "FNO" : providedType;
 
         return pnlPlanRepository
-                .findFirstByUser_IdAndActiveTrueAndStartDateLessThanEqualAndEndDateGreaterThanEqualOrderByStartDateDesc(
+                .findFirstByUser_IdAndPlanTypeAndActiveTrueAndStartDateLessThanEqualAndEndDateGreaterThanEqualOrderByStartDateDesc(
                         user.getId(),
+                        planType,
                         tradeDate,
                         tradeDate
                 )

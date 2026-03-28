@@ -10,7 +10,7 @@ public class JwtUtil {
     private static final String SECRET = System.getenv("JWT_SECRET");
     private static final Key key = Keys.hmacShaKeyFor(SECRET.getBytes());
 
-    private static final long ACCESS_EXP = 1000 * 60; // 15 min
+    private static final long ACCESS_EXP = 1000 * 60 * 30; // 15 min
     private static final long REFRESH_EXP = 1000L * 60 * 60 * 24 * 7; // 7 days
 
     public static String generateAccessToken(String email) {

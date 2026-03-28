@@ -11,6 +11,8 @@ public interface PnlPlanMonthRepository extends JpaRepository<PnlPlanMonth, Long
 
     List<PnlPlanMonth> findByPlan_IdOrderByMonthSequenceAsc(Long planId);
 
+    List<PnlPlanMonth> findByPlan_User_IdOrderByPlan_IdAscMonthSequenceAsc(Long userId);
+
     Optional<PnlPlanMonth> findFirstByPlan_IdAndStartDateLessThanEqualAndEndDateGreaterThanEqual(
             Long planId,
             LocalDate tradeDateStart,
