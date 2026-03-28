@@ -6,6 +6,7 @@ import com.example.tradeLedger.dto.PnlManualEntryRequestDto;
 import com.example.tradeLedger.dto.PnlMonthSummaryDto;
 import com.example.tradeLedger.dto.PnlMonthTargetUpdateDto;
 import com.example.tradeLedger.dto.PnlPlanDto;
+import com.example.tradeLedger.dto.PnlPlanMonthDetailsDto;
 import com.example.tradeLedger.dto.PnlPlanRequestDto;
 import com.example.tradeLedger.dto.PnlProcessResultDto;
 import com.example.tradeLedger.dto.PnlWorkbookViewDto;
@@ -43,6 +44,8 @@ public interface PnlLedgerService {
     List<PnlMonthSummaryDto> getYearSummary(UserDetails user, LocalDate tradeDate, String planType);
 
     List<PnlDailyCalculationDto> getMonthSheet(UserDetails user, LocalDate tradeDate, String planType);
+
+    PnlPlanMonthDetailsDto getPlanMonthDetailsByLabel(UserDetails user, Long planId, String monthLabel);
 
     void generateMonthlyStructure(LocalDate tradeDate);
 

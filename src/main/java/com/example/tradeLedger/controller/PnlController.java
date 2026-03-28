@@ -56,6 +56,15 @@ public class PnlController {
         return execute(authentication, "Month target updated successfully", user -> pnlLedgerService.updateMonthTarget(user, monthId, request));
     }
 
+    @GetMapping("/plans/month")
+    public ResponseEntity<ResponseDto> getPlanMonthDetails(
+            @RequestParam Long planId,
+            @RequestParam String monthLabel,
+            Authentication authentication
+    ) {
+        return execute(authentication, "Plan month details fetched successfully", user -> pnlLedgerService.getPlanMonthDetailsByLabel(user, planId, monthLabel));
+    }
+
     @PostMapping("/daily/manual-entry")
     public ResponseEntity<ResponseDto> upsertManualDailyPnl(
             @RequestBody PnlManualEntryRequestDto request,

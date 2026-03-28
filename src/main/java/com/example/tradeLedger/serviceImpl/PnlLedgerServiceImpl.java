@@ -6,6 +6,7 @@ import com.example.tradeLedger.dto.PnlManualEntryRequestDto;
 import com.example.tradeLedger.dto.PnlMonthSummaryDto;
 import com.example.tradeLedger.dto.PnlMonthTargetUpdateDto;
 import com.example.tradeLedger.dto.PnlPlanDto;
+import com.example.tradeLedger.dto.PnlPlanMonthDetailsDto;
 import com.example.tradeLedger.dto.PnlPlanMonthDto;
 import com.example.tradeLedger.dto.PnlPlanRequestDto;
 import com.example.tradeLedger.dto.PnlProcessResultDto;
@@ -369,6 +370,49 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
         List<PnlMonthSummaryDto> yearSummary = buildYearSummary(plan, months, monthTradingDays);
 
         return buildDailySheet(currentMonth, monthTradingDays.getOrDefault(currentMonth.getId(), List.of()), yearSummary);
+    }
+
+    @Override
+    @Transactional(Transactional.TxType.SUPPORTS)
+    public PnlPlanMonthDetailsDto getPlanMonthDetailsByLabel(UserDetails user, Long planId, String monthLabel) {
+        if (user == null || user.getId() == null) {
+            throw new IllegalArgumentException("User is required.");
+        }
+        if (planId == null) {
+            throw new IllegalArgumentException("Plan id is required.");
+        }
+        if (monthLabel == null || monthLabel.isBlank()) {
+            throw new IllegalArgumentException("Month label is required.");
+        }
+
+        PnlPlan plan = pnlPlanRepository.findByIdAndUser_Id(planId, user.getId())
+                .orElseThrow(() -> new IllegalArgumentException("Plan not found."));
+
+        PnlPlanMonth currentMonth = pnlPlanMonthRepository.findByPlan_IdAndMonthLabelIgnoreCase(plan.getId(), monthLabel.trim())
+                .orElseThrow(() -> new IllegalArgumentException("Month not found for the given label."));
+
+        ensureTradingDaysForTradeDate(plan, currentMonth, LocalDate.now());
+
+        List<PnlPlanMonth> months = pnlPlanMonthRepository.findByPlan_IdOrderByMonthSequenceAsc(plan.getId());
+        Map<Long, List<PnlTradingDay>> monthTradingDays = groupTradingDaysByMonth(plan.getId(), months);
+        List<PnlMonthSummaryDto> yearSummary = buildYearSummary(plan, months, monthTradingDays);
+
+        PnlMonthSummaryDto monthSummary = yearSummary.stream()
+                .filter(summary -> summary.getMonthSequence().equals(currentMonth.getMonthSequence()))
+                .findFirst()
+                .orElse(null);
+
+        List<PnlDailyCalculationDto> dailySheet = buildDailySheet(currentMonth, monthTradingDays.getOrDefault(currentMonth.getId(), List.of()), yearSummary);
+
+        PnlPlanMonthDetailsDto details = new PnlPlanMonthDetailsDto();
+        details.setPlan(toPlanDto(plan, months));
+        details.setMonthId(currentMonth.getId());
+        details.setMonthSequence(currentMonth.getMonthSequence());
+        details.setMonthLabel(currentMonth.getMonthLabel());
+        details.setMonthSummary(monthSummary);
+        details.setDailySheet(dailySheet);
+
+        return details;
     }
 
     @Override

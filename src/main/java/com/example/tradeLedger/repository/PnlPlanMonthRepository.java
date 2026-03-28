@@ -20,4 +20,6 @@ public interface PnlPlanMonthRepository extends JpaRepository<PnlPlanMonth, Long
     );
 
     Optional<PnlPlanMonth> findByIdAndPlan_User_Id(Long id, Long userId);
+
+    Optional<PnlPlanMonth> findByPlan_IdAndMonthLabelIgnoreCase(Long planId, String monthLabel);
 }
