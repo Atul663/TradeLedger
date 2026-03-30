@@ -182,6 +182,8 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
             plan.setCreatedAt(LocalDateTime.now());
         }
 
+        plan.setPlanType(request.getPlanType() != null && !request.getPlanType().isBlank() ? request.getPlanType() : "FNO");
+
         boolean active = request.getActive() == null || request.getActive();
         if (active) {
             deactivateOtherPlans(user.getId(), plan.getId(), plan.getPlanType());
@@ -195,7 +197,6 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
         plan.setCurrency(normalizeCurrency(request.getCurrency()));
         plan.setActive(active);
         plan.setUpdatedAt(LocalDateTime.now());
-        plan.setPlanType(request.getPlanType() != null && !request.getPlanType().isBlank() ? request.getPlanType() : "FNO");
         plan.setStartingCapital(scale(request.getStartingCapital()));
         plan.setTotalAchievedAmount(ZERO);
         plan = pnlPlanRepository.save(plan);

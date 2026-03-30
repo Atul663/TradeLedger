@@ -15,6 +15,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/pnl")
@@ -95,10 +96,26 @@ public class PnlController {
 
     @PostMapping("/daily/manual-entry")
     public ResponseEntity<ResponseDto> upsertManualDailyPnl(
-            @RequestBody PnlManualEntryRequestDto request,
+            @RequestBody List<PnlManualEntryRequestDto> requests,
             Authentication authentication
     ) {
-        return execute(authentication, "Daily PnL saved successfully", user -> pnlLedgerService.upsertManualDailyPnl(user, request));
+        return execute(authentication, "Daily PnL saved successfully", user -> {
+            List<java.util.Map<String, Object>> results = new java.util.ArrayList<>();
+            for (PnlManualEntryRequestDto request : requests) {
+                java.util.Map<String, Object> entryResult = new java.util.LinkedHashMap<>();
+                entryResult.put("tradeDate", request.getTradeDate());
+                entryResult.put("selectedPlan", request.getSelectedPlan());
+                try {
+                    entryResult.put("status", "SUCCESS");
+                    entryResult.put("data", pnlLedgerService.upsertManualDailyPnl(user, request));
+                } catch (Exception e) {
+                    entryResult.put("status", "FAILED");
+                    entryResult.put("error", e.getMessage());
+                }
+                results.add(entryResult);
+            }
+            return results;
+        });
     }
 
     private ResponseEntity<ResponseDto> execute(
