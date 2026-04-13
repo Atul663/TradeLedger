@@ -94,6 +94,23 @@ public class PnlController {
         return execute(authentication, "Plan month details fetched successfully", user -> pnlLedgerService.getPlanMonthDetailsByLabel(user, planId, monthLabel));
     }
 
+    @GetMapping("/plans/{planId}/months")
+    public ResponseEntity<ResponseDto> getPlanMonthsDetails(
+            @PathVariable Long planId,
+            Authentication authentication
+    ) {
+        return execute(authentication, "Plan month details fetched successfully", user -> pnlLedgerService.getPlanMonthsDetails(user, planId));
+    }
+
+    @GetMapping("/plans/{planId}/months/{monthId}/days")
+    public ResponseEntity<ResponseDto> getPlanMonthDaysDetails(
+            @PathVariable Long planId,
+            @PathVariable Long monthId,
+            Authentication authentication
+    ) {
+        return execute(authentication, "Plan month days fetched successfully", user -> pnlLedgerService.getPlanMonthDaysDetails(user, planId, monthId));
+    }
+
     @PostMapping("/daily/manual-entry")
     public ResponseEntity<ResponseDto> upsertManualDailyPnl(
             @RequestBody List<PnlManualEntryRequestDto> requests,

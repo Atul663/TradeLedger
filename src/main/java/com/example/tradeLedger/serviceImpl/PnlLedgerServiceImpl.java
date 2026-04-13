@@ -6,6 +6,8 @@ import com.example.tradeLedger.dto.PnlManualEntryRequestDto;
 import com.example.tradeLedger.dto.PnlMonthSummaryDto;
 import com.example.tradeLedger.dto.PnlMonthTargetUpdateDto;
 import com.example.tradeLedger.dto.PnlPlanDto;
+import com.example.tradeLedger.dto.PlanDayDetailDto;
+import com.example.tradeLedger.dto.PlanMonthDetailDto;
 import com.example.tradeLedger.dto.PnlPlanMonthDetailsDto;
 import com.example.tradeLedger.dto.PnlPlanMonthDto;
 import com.example.tradeLedger.dto.PnlPlanRequestDto;
@@ -513,6 +515,157 @@ public class PnlLedgerServiceImpl implements PnlLedgerService {
         details.setDailySheet(dailySheet);
 
         return details;
+    }
+
+    @Override
+    @Transactional(Transactional.TxType.SUPPORTS)
+    public List<PlanMonthDetailDto> getPlanMonthsDetails(UserDetails user, Long planId) {
+        if (user == null || user.getId() == null) {
+            throw new IllegalArgumentException("User is required.");
+        }
+        if (planId == null) {
+            throw new IllegalArgumentException("Plan id is required.");
+        }
+
+        PnlPlan plan = pnlPlanRepository.findByIdAndUser_Id(planId, user.getId())
+                .orElseThrow(() -> new IllegalArgumentException("Plan not found."));
+
+        List<PnlPlanMonth> months = pnlPlanMonthRepository.findByPlan_IdOrderByMonthSequenceAsc(plan.getId());
+        Map<Long, List<PnlTradingDay>> monthTradingDays = groupTradingDaysByMonth(plan.getId(), months);
+
+        List<PlanMonthDetailDto> monthDetailsList = new ArrayList<>();
+        BigDecimal achievedAmount = ZERO;
+
+        for (PnlPlanMonth month : months) {
+            List<PnlTradingDay> tradingDays = monthTradingDays.getOrDefault(month.getId(), List.of());
+            
+            BigDecimal netPnl = ZERO;
+            int profitDays = 0;
+            int lossDays = 0;
+            int tradingDaysCount = 0;
+
+            for (PnlTradingDay day : tradingDays) {
+                if (day.getDailyFact() != null && day.getDailyFact().getNetPnl() != null) {
+                    tradingDaysCount++;
+                    BigDecimal dayNetPnl = scale(day.getDailyFact().getNetPnl());
+                    netPnl = netPnl.add(dayNetPnl);
+                    if (dayNetPnl.compareTo(BigDecimal.ZERO) > 0) {
+                        profitDays++;
+                    } else if (dayNetPnl.compareTo(BigDecimal.ZERO) < 0) {
+                        lossDays++;
+                    }
+                }
+            }
+
+            achievedAmount = achievedAmount.add(netPnl);
+
+            PlanMonthDetailDto dto = new PlanMonthDetailDto();
+            dto.setId(month.getId());
+            dto.setMonthLabel(month.getMonthLabel());
+            dto.setMonthSequence(month.getMonthSequence());
+            dto.setStartDate(month.getStartDate());
+            dto.setEndDate(month.getEndDate());
+            dto.setAllocatedTarget(month.getAllocatedTarget() != null ? scale(month.getAllocatedTarget()) : null);
+            dto.setManualTarget(month.getManualTarget() != null ? scale(month.getManualTarget()) : null);
+            dto.setTradingDaysPlanned(month.getTradingDaysPlanned());
+            dto.setAchievedAmount(achievedAmount);
+            dto.setNetPnl(netPnl);
+            dto.setProfitDays(profitDays);
+            dto.setLossDays(lossDays);
+            dto.setTradingDays(tradingDaysCount);
+
+            monthDetailsList.add(dto);
+        }
+
+        return monthDetailsList;
+    }
+
+    @Override
+    @Transactional(Transactional.TxType.SUPPORTS)
+    public List<PlanDayDetailDto> getPlanMonthDaysDetails(UserDetails user, Long planId, Long monthId) {
+        if (user == null || user.getId() == null) {
+            throw new IllegalArgumentException("User is required.");
+        }
+        if (planId == null) {
+            throw new IllegalArgumentException("Plan id is required.");
+        }
+        if (monthId == null) {
+            throw new IllegalArgumentException("Month id is required.");
+        }
+
+        PnlPlanMonth month = pnlPlanMonthRepository.findByIdAndPlan_User_Id(monthId, user.getId())
+                .orElseThrow(() -> new IllegalArgumentException("Plan month not found."));
+
+        if (!month.getPlan().getId().equals(planId)) {
+            throw new IllegalArgumentException("Plan month does not belong to the given plan.");
+        }
+
+        LocalDate monthStart = month.getStartDate();
+        LocalDate monthEnd = month.getEndDate();
+
+        List<LocalDate> tradingDates = resolveTradingDates(monthStart, monthEnd);
+
+        List<PnlTradingDay> tradingDays = pnlTradingDayRepository.findByPlanMonth_IdOrderByTradingDaySeqAsc(monthId);
+        Map<LocalDate, PnlTradingDay> existingByDate = new HashMap<>();
+        for (PnlTradingDay day : tradingDays) {
+            existingByDate.put(day.getTradeDate(), day);
+        }
+
+        BigDecimal achievedBeforeDay = scale(pnlDailyFactRepository.sumNetPnlByPlanIdBeforeDate(planId, monthStart));
+
+        List<PlanDayDetailDto> result = new ArrayList<>();
+        LocalDate cursor = monthStart;
+
+        while (!cursor.isAfter(monthEnd)) {
+            boolean isTradingDay = tradingDates.contains(cursor);
+            PnlTradingDay dayRecord = existingByDate.get(cursor);
+
+            PlanDayDetailDto dto = new PlanDayDetailDto();
+            dto.setDate(cursor);
+            dto.setTradingDay(isTradingDay);
+
+            if (!isTradingDay) {
+                dto.setStatus("HOLIDAY");
+                dto.setTargetAmount(ZERO);
+                dto.setAchievedAmount(ZERO);
+                dto.setNetPnl(ZERO);
+            } else {
+                if (dayRecord != null) {
+                    BigDecimal storedDailyPlan = dayRecord.getDailyTarget() != null ? scale(dayRecord.getDailyTarget()) : ZERO;
+                    dto.setTargetAmount(storedDailyPlan);
+
+                    if (dayRecord.getDailyFact() != null && dayRecord.getDailyFact().getNetPnl() != null) {
+                        BigDecimal netPnl = scale(dayRecord.getDailyFact().getNetPnl());
+                        achievedBeforeDay = achievedBeforeDay.add(netPnl);
+                        
+                        dto.setNetPnl(netPnl);
+                        dto.setAchievedAmount(achievedBeforeDay);
+
+                        if (netPnl.compareTo(BigDecimal.ZERO) > 0) {
+                            dto.setStatus("PROFIT");
+                        } else if (netPnl.compareTo(BigDecimal.ZERO) < 0) {
+                            dto.setStatus("LOSS");
+                        } else {
+                            dto.setStatus("FLAT");
+                        }
+                    } else {
+                        dto.setNetPnl(null);
+                        dto.setAchievedAmount(null);
+                        dto.setStatus("NO_DATA");
+                    }
+                } else {
+                    dto.setTargetAmount(null);
+                    dto.setNetPnl(null);
+                    dto.setAchievedAmount(null);
+                    dto.setStatus("NO_DATA");
+                }
+            }
+
+            result.add(dto);
+            cursor = cursor.plusDays(1);
+        }
+
+        return result;
     }
 
     @Override

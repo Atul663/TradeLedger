@@ -53,6 +53,10 @@ public interface PnlLedgerService {
 
     PnlPlanMonthDetailsDto getPlanMonthDetailsByLabel(UserDetails user, Long planId, String monthLabel);
 
+    List<com.example.tradeLedger.dto.PlanMonthDetailDto> getPlanMonthsDetails(UserDetails user, Long planId);
+
+    List<com.example.tradeLedger.dto.PlanDayDetailDto> getPlanMonthDaysDetails(UserDetails user, Long planId, Long monthId);
+
     void generateMonthlyStructure(LocalDate tradeDate);
 
     void ensureMonthlyStructure(UserDetails user, LocalDate tradeDate, String planType);
