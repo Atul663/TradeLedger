@@ -9,6 +9,7 @@ import com.example.tradeLedger.service.PdfProcessingService;
 import com.example.tradeLedger.utils.CryptoUtil;
 import com.google.api.client.googleapis.auth.oauth2.GoogleRefreshTokenRequest;
 import com.google.api.client.googleapis.auth.oauth2.GoogleTokenResponse;
+import com.google.api.client.googleapis.json.GoogleJsonResponseException;
 import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
 import com.google.api.client.json.gson.GsonFactory;
 import com.google.api.client.auth.oauth2.Credential;
@@ -72,7 +73,12 @@ public class GmailServiceImpl implements GmailService {
         try {
             fetchEmailsWithAttachments(accessToken, senderEmail, userDetails);
 
-        } catch (Exception e) {
+        } catch (GoogleJsonResponseException e) {
+            if (e.getStatusCode() == 403) {
+                System.out.println("Gmail access denied for " + userDetails.getEmail()
+                        + " — insufficient scope or revoked access. User must re-authenticate.");
+                return;
+            }
 
             System.out.println("Access token expired, refreshing...");
 
