@@ -167,12 +167,10 @@ public class GoogleAuthServiceImpl implements GoogleAuthService {
     private Cookie buildRefreshCookie(String value, int maxAge) {
         Cookie cookie = new Cookie("refresh_token", value);
         cookie.setHttpOnly(true);
-        cookie.setSecure(true);
+        cookie.setSecure(false);
         cookie.setPath("/");
         cookie.setMaxAge(maxAge);
-        if (maxAge > 0) {
-            cookie.setAttribute("SameSite", "None");
-        }
+        cookie.setAttribute("SameSite", "Lax");
         return cookie;
     }
 
