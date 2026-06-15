@@ -16,7 +16,7 @@ public class CorsConfig {
                 registry.addMapping("/**")
                         .allowedOriginPatterns(
                                 "https://trade-pnl-analysis.vercel.app",
-                                "https://laughing-system-6vq4gq6rrggf4964-5173.app.github.dev",
+                                "http://srv1679292.hstgr.cloud:*",
                                 "http://localhost:5173",
                                 "http://127.0.0.1:5173",
                                 "http://localhost:*",
