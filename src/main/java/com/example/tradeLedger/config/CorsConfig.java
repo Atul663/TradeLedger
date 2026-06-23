@@ -16,9 +16,9 @@ public class CorsConfig {
                 registry.addMapping("/**")
                         .allowedOriginPatterns(
                                 "https://trade-pnl-analysis.vercel.app",
-                                "https://proweltconsulting.com",
-                                "https://www.proweltconsulting.com",
-                                "https://api.proweltconsulting.com",
+                                "https://prowfin.proweltconsulting.com",
+                                "https://www.prowfin.proweltconsulting.com",
+                                "https://api.prowfin.proweltconsulting.com",
                                 "http://localhost:5173",
                                 "http://127.0.0.1:5173",
                                 "http://localhost:*",
