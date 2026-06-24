@@ -1,6 +1,7 @@
 package com.example.tradeLedger.config;
 
 import com.example.tradeLedger.security.JwtFilter;
+import com.example.tradeLedger.security.SecurityErrorHandler;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -15,9 +16,11 @@ import org.springframework.security.config.Customizer;
 public class SecurityConfig {
 
     private final JwtFilter jwtFilter;
+    private final SecurityErrorHandler securityErrorHandler;
 
-    public SecurityConfig(JwtFilter jwtFilter) {
+    public SecurityConfig(JwtFilter jwtFilter, SecurityErrorHandler securityErrorHandler) {
         this.jwtFilter = jwtFilter;
+        this.securityErrorHandler = securityErrorHandler;
     }
 
     @Bean
@@ -39,6 +42,11 @@ public class SecurityConfig {
                         ).permitAll()
                         .requestMatchers("/api/v1/**").permitAll()
                         .anyRequest().authenticated()
+                )
+
+                .exceptionHandling(ex -> ex
+                        .authenticationEntryPoint(securityErrorHandler)
+                        .accessDeniedHandler(securityErrorHandler)
                 )
 
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
