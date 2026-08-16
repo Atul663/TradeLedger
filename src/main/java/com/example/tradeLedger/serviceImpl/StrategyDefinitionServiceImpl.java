@@ -26,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -41,6 +42,7 @@ public class StrategyDefinitionServiceImpl implements StrategyDefinitionService 
     private final StrategyInstanceRepository instanceRepository;
     private final IndicatorDefRepository indicatorDefRepository;
     private final StrategyDefinitionValidator validator;
+    private final StrategyIndicatorSync indicatorSync;
     private final JsonSupport json;
 
     public StrategyDefinitionServiceImpl(StrategyRepository strategyRepository,
@@ -48,12 +50,14 @@ public class StrategyDefinitionServiceImpl implements StrategyDefinitionService 
                                          StrategyInstanceRepository instanceRepository,
                                          IndicatorDefRepository indicatorDefRepository,
                                          StrategyDefinitionValidator validator,
+                                         StrategyIndicatorSync indicatorSync,
                                          JsonSupport json) {
         this.strategyRepository = strategyRepository;
         this.paramDefRepository = paramDefRepository;
         this.instanceRepository = instanceRepository;
         this.indicatorDefRepository = indicatorDefRepository;
         this.validator = validator;
+        this.indicatorSync = indicatorSync;
         this.json = json;
     }
 
@@ -138,6 +142,7 @@ public class StrategyDefinitionServiceImpl implements StrategyDefinitionService 
         for (StrategyParamDefRequest param : params) {
             paramDefRepository.save(newParamDef(strategy, param));
         }
+        indicatorSync.sync(strategy);
 
         log.info("CREATE strategy '{}' id={} params={} indicators={}",
                 strategy.getName(), strategy.getId(), params.size(),
@@ -207,6 +212,9 @@ public class StrategyDefinitionServiceImpl implements StrategyDefinitionService 
         if (replacingParams) {
             replaceParams(strategy, params);
         }
+        // Unconditional: the tree may not have changed, but an indicator it
+        // references could have been created since the last save.
+        indicatorSync.sync(strategy);
 
         log.info("UPDATE strategy '{}' id={} active={} paramsReplaced={}",
                 strategy.getName(), strategy.getId(), strategy.isActive(), replacingParams);
@@ -255,6 +263,8 @@ public class StrategyDefinitionServiceImpl implements StrategyDefinitionService 
         // explicitly so it also happens under ddl-auto-generated schemas.
         paramDefRepository.findByStrategy_IdOrderByDisplayOrderAscParameterKeyAsc(id)
                 .forEach(paramDefRepository::delete);
+        // Same for the derived indicator index - its FK would block the delete.
+        indicatorSync.clear(id);
         strategyRepository.delete(strategy);
         log.info("DELETE strategy '{}' id={}", strategy.getName(), id);
     }
@@ -432,7 +442,13 @@ public class StrategyDefinitionServiceImpl implements StrategyDefinitionService 
                 paramDefRepository.findByStrategy_IdOrderByDisplayOrderAscParameterKeyAsc(strategy.getId())
                         .stream().map(this::toResponse).toList();
 
+        // Ids come from the strategy_indicators rows written at save time; the
+        // names still come from the tree, so the two stay index-aligned even when
+        // a referenced indicator is missing or inactive and therefore has no id.
+        Map<String, UUID> mappedIds = indicatorSync.indicatorIdsByName(strategy.getId());
+
         List<String> known = new ArrayList<>();
+        List<UUID> knownIds = new ArrayList<>();
         List<String> unknown = new ArrayList<>();
         JsonNode tree = json.readTree(strategy.getRuleTree());
         if (tree != null) {
@@ -440,7 +456,12 @@ public class StrategyDefinitionServiceImpl implements StrategyDefinitionService 
                 boolean usable = indicatorDefRepository.findByName(name)
                         .map(IndicatorDef::isActive)
                         .orElse(false);
-                (usable ? known : unknown).add(name);
+                if (usable) {
+                    known.add(name);
+                    knownIds.add(mappedIds.get(name));
+                } else {
+                    unknown.add(name);
+                }
             }
         }
 
@@ -453,6 +474,7 @@ public class StrategyDefinitionServiceImpl implements StrategyDefinitionService 
                 strategy.isActive(),
                 json.toMap(strategy.getRuleTree()),
                 known,
+                knownIds,
                 unknown,
                 params,
                 instanceRepository.countByStrategy_Id(strategy.getId()),

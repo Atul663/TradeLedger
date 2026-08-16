@@ -6,6 +6,7 @@ import com.example.tradeLedger.entity.StrategyParamDef;
 import com.example.tradeLedger.repository.IndicatorDefRepository;
 import com.example.tradeLedger.repository.StrategyParamDefRepository;
 import com.example.tradeLedger.repository.StrategyRepository;
+import com.example.tradeLedger.serviceImpl.StrategyIndicatorSync;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
@@ -42,13 +43,16 @@ public class ControlPlaneSeeder implements ApplicationRunner {
     private final IndicatorDefRepository indicatorDefRepository;
     private final StrategyRepository strategyRepository;
     private final StrategyParamDefRepository paramDefRepository;
+    private final StrategyIndicatorSync indicatorSync;
 
     public ControlPlaneSeeder(IndicatorDefRepository indicatorDefRepository,
                               StrategyRepository strategyRepository,
-                              StrategyParamDefRepository paramDefRepository) {
+                              StrategyParamDefRepository paramDefRepository,
+                              StrategyIndicatorSync indicatorSync) {
         this.indicatorDefRepository = indicatorDefRepository;
         this.strategyRepository = strategyRepository;
         this.paramDefRepository = paramDefRepository;
+        this.indicatorSync = indicatorSync;
     }
 
     @Override
@@ -82,6 +86,12 @@ public class ControlPlaneSeeder implements ApplicationRunner {
                 "{\"min\":0.1,\"max\":20}", "Stop loss %", 3);
         seedParam(strategy, "tp_pct", StrategyParamDef.TYPE_DECIMAL, StrategyParamDef.SCOPE_EXECUTION, "3.0",
                 "{\"min\":0.1,\"max\":50}", "Take profit %", 4);
+
+        // The strategy-indicator index is derived from rule trees, and rows
+        // seeded here never went through the API that maintains it. Rebuilding
+        // once at startup also covers strategies inserted straight into the
+        // database, and is idempotent like everything else in this class.
+        indicatorSync.syncAll();
     }
 
     private void seedIndicator(String name, String paramSchema) {

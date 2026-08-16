@@ -20,10 +20,11 @@ import java.util.UUID;
  *
  * That is the strategy-to-indicator relationship in this design: {@code "ind"}
  * values resolve by name against {@link IndicatorDef}, and the {@code $key}
- * bindings resolve against {@link StrategyParamDef} rows. There is deliberately
- * no strategy_indicators join table - a fixed link would not survive one strategy
- * using the same indicator at two different parameterizations, which is exactly
- * what EMA Crossover does.
+ * bindings resolve against {@link StrategyParamDef} rows. The tree stays the
+ * source of truth; {@link StrategyIndicator} indexes it into real foreign keys
+ * on every save, recording WHICH indicators are used and never at which
+ * parameterization - one strategy using the same indicator twice, as EMA
+ * Crossover does, is one dependency and two computations.
  *
  * Tunable knobs live in {@link StrategyParamDef}; concrete values live in
  * {@link StrategyInstance} (signal scope) and {@link Subscription} (execution
