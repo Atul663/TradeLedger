@@ -1,9 +1,11 @@
 package com.example.tradeLedger.controller;
 
+import com.example.tradeLedger.dto.ParameterResponse;
 import com.example.tradeLedger.dto.StrategyDetailResponse;
 import com.example.tradeLedger.dto.StrategyParamDefRequest;
 import com.example.tradeLedger.dto.StrategyParamDefResponse;
 import com.example.tradeLedger.dto.StrategyRequest;
+import com.example.tradeLedger.service.ParameterCatalogService;
 import com.example.tradeLedger.service.StrategyDefinitionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -31,9 +33,12 @@ public class StrategyDefinitionController extends SecuredController {
     private static final Logger log = LoggerFactory.getLogger(StrategyDefinitionController.class);
 
     private final StrategyDefinitionService strategyService;
+    private final ParameterCatalogService parameterService;
 
-    public StrategyDefinitionController(StrategyDefinitionService strategyService) {
+    public StrategyDefinitionController(StrategyDefinitionService strategyService,
+                                        ParameterCatalogService parameterService) {
         this.strategyService = strategyService;
+        this.parameterService = parameterService;
     }
 
     @GetMapping
@@ -80,6 +85,20 @@ public class StrategyDefinitionController extends SecuredController {
         log.info("DELETE strategy={} | user={}", id, currentEmail());
         strategyService.delete(id);
         return ResponseEntity.noContent().build();
+    }
+
+    // --------------------------------------------------------- the hierarchy
+
+    /**
+     * The strategy's own parameters - SL, TP and friends - without its indicators'.
+     * The full hierarchy comes back from {@code GET /api/v1/strategies/{id}}; this
+     * is the one branch of it on its own.
+     */
+    @GetMapping("/{id}/parameters")
+    @Operation(summary = "Parameters belonging to the strategy directly, by id")
+    public List<ParameterResponse> parameters(@PathVariable UUID id) {
+        log.info("GET strategy={} parameters | user={}", id, currentEmail());
+        return parameterService.forStrategy(id);
     }
 
     // ------------------------------------------------- indicator parameters

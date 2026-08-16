@@ -1,19 +1,27 @@
 package com.example.tradeLedger.serviceImpl;
 
+import com.example.tradeLedger.dto.IndicatorSummaryResponse;
+import com.example.tradeLedger.dto.ParameterResponse;
 import com.example.tradeLedger.dto.StrategyDetailResponse;
 import com.example.tradeLedger.dto.StrategyParamDefRequest;
 import com.example.tradeLedger.dto.StrategyParamDefResponse;
 import com.example.tradeLedger.dto.StrategyRequest;
 import com.example.tradeLedger.entity.IndicatorDef;
+import com.example.tradeLedger.entity.IndicatorParameter;
+import com.example.tradeLedger.entity.Parameter;
 import com.example.tradeLedger.entity.Strategy;
 import com.example.tradeLedger.entity.StrategyParamDef;
+import com.example.tradeLedger.entity.StrategyParameter;
 import com.example.tradeLedger.exception.ResourceConflictException;
 import com.example.tradeLedger.exception.ResourceNotFoundException;
 import com.example.tradeLedger.exception.StrategyValidationException;
 import com.example.tradeLedger.indicator.IndicatorResolver;
 import com.example.tradeLedger.repository.IndicatorDefRepository;
+import com.example.tradeLedger.repository.IndicatorParameterRepository;
+import com.example.tradeLedger.repository.StrategyIndicatorRepository;
 import com.example.tradeLedger.repository.StrategyInstanceRepository;
 import com.example.tradeLedger.repository.StrategyParamDefRepository;
+import com.example.tradeLedger.repository.StrategyParameterRepository;
 import com.example.tradeLedger.repository.StrategyRepository;
 import com.example.tradeLedger.service.StrategyDefinitionService;
 import com.example.tradeLedger.utils.JsonSupport;
@@ -41,23 +49,35 @@ public class StrategyDefinitionServiceImpl implements StrategyDefinitionService 
     private final StrategyParamDefRepository paramDefRepository;
     private final StrategyInstanceRepository instanceRepository;
     private final IndicatorDefRepository indicatorDefRepository;
+    private final StrategyIndicatorRepository strategyIndicatorRepository;
+    private final IndicatorParameterRepository indicatorParameterRepository;
+    private final StrategyParameterRepository strategyParameterRepository;
     private final StrategyDefinitionValidator validator;
     private final StrategyIndicatorSync indicatorSync;
+    private final StrategyParameterSync parameterSync;
     private final JsonSupport json;
 
     public StrategyDefinitionServiceImpl(StrategyRepository strategyRepository,
                                          StrategyParamDefRepository paramDefRepository,
                                          StrategyInstanceRepository instanceRepository,
                                          IndicatorDefRepository indicatorDefRepository,
+                                         StrategyIndicatorRepository strategyIndicatorRepository,
+                                         IndicatorParameterRepository indicatorParameterRepository,
+                                         StrategyParameterRepository strategyParameterRepository,
                                          StrategyDefinitionValidator validator,
                                          StrategyIndicatorSync indicatorSync,
+                                         StrategyParameterSync parameterSync,
                                          JsonSupport json) {
         this.strategyRepository = strategyRepository;
         this.paramDefRepository = paramDefRepository;
         this.instanceRepository = instanceRepository;
         this.indicatorDefRepository = indicatorDefRepository;
+        this.strategyIndicatorRepository = strategyIndicatorRepository;
+        this.indicatorParameterRepository = indicatorParameterRepository;
+        this.strategyParameterRepository = strategyParameterRepository;
         this.validator = validator;
         this.indicatorSync = indicatorSync;
+        this.parameterSync = parameterSync;
         this.json = json;
     }
 
@@ -142,7 +162,11 @@ public class StrategyDefinitionServiceImpl implements StrategyDefinitionService 
         for (StrategyParamDefRequest param : params) {
             paramDefRepository.save(newParamDef(strategy, param));
         }
+        // Index the rule tree into strategy_indicators, then derive the knob set
+        // from the catalog. Order matters: the parameter sync walks the indicator
+        // links the first call writes.
         indicatorSync.sync(strategy);
+        parameterSync.sync(strategy);
 
         log.info("CREATE strategy '{}' id={} params={} indicators={}",
                 strategy.getName(), strategy.getId(), params.size(),
@@ -215,6 +239,7 @@ public class StrategyDefinitionServiceImpl implements StrategyDefinitionService 
         // Unconditional: the tree may not have changed, but an indicator it
         // references could have been created since the last save.
         indicatorSync.sync(strategy);
+        parameterSync.sync(strategy);
 
         log.info("UPDATE strategy '{}' id={} active={} paramsReplaced={}",
                 strategy.getName(), strategy.getId(), strategy.isActive(), replacingParams);
@@ -263,8 +288,9 @@ public class StrategyDefinitionServiceImpl implements StrategyDefinitionService 
         // explicitly so it also happens under ddl-auto-generated schemas.
         paramDefRepository.findByStrategy_IdOrderByDisplayOrderAscParameterKeyAsc(id)
                 .forEach(paramDefRepository::delete);
-        // Same for the derived indicator index - its FK would block the delete.
+        // Same for the link tables - their FKs would block the delete.
         indicatorSync.clear(id);
+        parameterSync.clear(id);
         strategyRepository.delete(strategy);
         log.info("DELETE strategy '{}' id={}", strategy.getName(), id);
     }
@@ -442,13 +468,27 @@ public class StrategyDefinitionServiceImpl implements StrategyDefinitionService 
                 paramDefRepository.findByStrategy_IdOrderByDisplayOrderAscParameterKeyAsc(strategy.getId())
                         .stream().map(this::toResponse).toList();
 
-        // Ids come from the strategy_indicators rows written at save time; the
-        // names still come from the tree, so the two stay index-aligned even when
-        // a referenced indicator is missing or inactive and therefore has no id.
-        Map<String, UUID> mappedIds = indicatorSync.indicatorIdsByName(strategy.getId());
+        // The hierarchy comes from the link tables, not the rule tree: one row per
+        // indicator the strategy uses, each carrying its own parameters by id.
+        List<IndicatorSummaryResponse> indicators = strategyIndicatorRepository
+                .findByStrategy_IdOrderByIndicator_NameAsc(strategy.getId()).stream()
+                .map(link -> new IndicatorSummaryResponse(
+                        link.getIndicator().getId(),
+                        link.getIndicator().getName(),
+                        link.getIndicator().isActive(),
+                        indicatorParameterRepository
+                                .findByIndicator_IdOrderByDisplayOrderAscIdAsc(link.getIndicator().getId())
+                                .stream().map(this::toResponse).toList()))
+                .toList();
 
-        List<String> known = new ArrayList<>();
-        List<UUID> knownIds = new ArrayList<>();
+        List<ParameterResponse> parameters = strategyParameterRepository
+                .findByStrategy_IdOrderByDisplayOrderAscIdAsc(strategy.getId()).stream()
+                .map(this::toResponse)
+                .toList();
+
+        // A name the tree references that resolves to no active indicator has no
+        // link row and therefore no id - which is exactly how a broken tree
+        // surfaces before anyone subscribes to it.
         List<String> unknown = new ArrayList<>();
         JsonNode tree = json.readTree(strategy.getRuleTree());
         if (tree != null) {
@@ -456,10 +496,7 @@ public class StrategyDefinitionServiceImpl implements StrategyDefinitionService 
                 boolean usable = indicatorDefRepository.findByName(name)
                         .map(IndicatorDef::isActive)
                         .orElse(false);
-                if (usable) {
-                    known.add(name);
-                    knownIds.add(mappedIds.get(name));
-                } else {
+                if (!usable) {
                     unknown.add(name);
                 }
             }
@@ -473,13 +510,40 @@ public class StrategyDefinitionServiceImpl implements StrategyDefinitionService 
                 strategy.isSystem(),
                 strategy.isActive(),
                 json.toMap(strategy.getRuleTree()),
-                known,
-                knownIds,
+                indicators,
+                parameters,
                 unknown,
                 params,
                 instanceRepository.countByStrategy_Id(strategy.getId()),
                 strategy.getCreatedAt(),
                 strategy.getUpdatedAt());
+    }
+
+    private ParameterResponse toResponse(IndicatorParameter link) {
+        return toResponse(link.getParameter(), link.effectiveDefault(),
+                link.effectiveValidation(), link.getDisplayOrder(), link.isRequired());
+    }
+
+    private ParameterResponse toResponse(StrategyParameter link) {
+        return toResponse(link.getParameter(), link.effectiveDefault(),
+                link.effectiveValidation(), link.getDisplayOrder(), link.isRequired());
+    }
+
+    /** Catalog identity plus the values in force for this particular attachment. */
+    private ParameterResponse toResponse(Parameter parameter, String defaultValue,
+                                         String validation, int displayOrder, boolean required) {
+        return new ParameterResponse(
+                parameter.getId(),
+                parameter.getCode(),
+                parameter.getName(),
+                parameter.getDataType(),
+                parameter.getScope(),
+                defaultValue,
+                json.toMap(validation),
+                parameter.getDescription(),
+                parameter.isUniversal(),
+                displayOrder,
+                required);
     }
 
     private StrategyParamDefResponse toResponse(StrategyParamDef def) {

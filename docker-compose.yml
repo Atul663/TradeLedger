@@ -14,5 +14,9 @@ services:
       DHAN_PARTNER_ID: ${DHAN_PARTNER_ID}
       DHAN_PARTNER_SECRET: ${DHAN_PARTNER_SECRET}
       DHAN_CONSENT_ID: ${DHAN_CONSENT_ID}
+      # Set DDL_AUTO=create for a one-off schema rebuild, then unset. The default
+      # is spelled out here because compose passes an empty string for an unset
+      # variable, and an empty value would defeat the property's own default.
+      DDL_AUTO: ${DDL_AUTO:-update}
     restart: always
 

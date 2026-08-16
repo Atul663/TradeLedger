@@ -1,6 +1,7 @@
 package com.example.tradeLedger.exception;
 
 import com.example.tradeLedger.controller.IndicatorController;
+import com.example.tradeLedger.controller.ParameterController;
 import com.example.tradeLedger.controller.ReferenceDataController;
 import com.example.tradeLedger.controller.StrategyDefinitionController;
 import com.example.tradeLedger.controller.StrategyInstanceController;
@@ -30,6 +31,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
         StrategyDefinitionController.class,
         IndicatorController.class,
         StrategyInstanceController.class,
+        ParameterController.class,
         SubscriptionController.class,
         TradingAccountController.class,
         ReferenceDataController.class

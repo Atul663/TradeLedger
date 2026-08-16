@@ -2,7 +2,9 @@ package com.example.tradeLedger.controller;
 
 import com.example.tradeLedger.dto.IndicatorDefRequest;
 import com.example.tradeLedger.dto.IndicatorDefResponse;
+import com.example.tradeLedger.dto.ParameterResponse;
 import com.example.tradeLedger.service.IndicatorDefinitionService;
+import com.example.tradeLedger.service.ParameterCatalogService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
@@ -31,9 +33,12 @@ public class IndicatorController extends SecuredController {
     private static final Logger log = LoggerFactory.getLogger(IndicatorController.class);
 
     private final IndicatorDefinitionService indicatorService;
+    private final ParameterCatalogService parameterService;
 
-    public IndicatorController(IndicatorDefinitionService indicatorService) {
+    public IndicatorController(IndicatorDefinitionService indicatorService,
+                               ParameterCatalogService parameterService) {
         this.indicatorService = indicatorService;
+        this.parameterService = parameterService;
     }
 
     @GetMapping
@@ -55,6 +60,17 @@ public class IndicatorController extends SecuredController {
     public IndicatorDefResponse getByName(@PathVariable String name) {
         log.info("GET indicator name='{}' | user={}", name, currentEmail());
         return indicatorService.getByName(name);
+    }
+
+    /**
+     * The second level of the hierarchy on its own, for a client that already has
+     * an indicator id and does not want the whole strategy.
+     */
+    @GetMapping("/{id}/parameters")
+    @Operation(summary = "The parameters of one indicator, by id")
+    public List<ParameterResponse> parameters(@PathVariable UUID id) {
+        log.info("GET indicator={} parameters | user={}", id, currentEmail());
+        return parameterService.forIndicator(id);
     }
 
     @PostMapping
