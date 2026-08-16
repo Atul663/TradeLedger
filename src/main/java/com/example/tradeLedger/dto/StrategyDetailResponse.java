@@ -18,8 +18,15 @@ import java.util.UUID;
  *     └── parameters[]            (strategy_parameters  -> parameters)
  * </pre>
  *
- * One GET gives a form everything it needs to render: the two parameter lists to
- * draw, and {@code params} - their flat derivation - to post back against.
+ * One GET gives a form everything it needs: the two parameter lists are the
+ * fields to draw, and their {@code code} values are the keys a subscribe request
+ * posts back. A subscribe body is one flat map, so a client concatenates the two
+ * lists - the server does the same thing internally and calls the result
+ * {@code strategy_param_defs}.
+ *
+ * That derived set is deliberately NOT repeated here: it is the union of these
+ * two lists and nothing more. {@code GET /api/v1/strategies/{id}/params} exposes
+ * it for anyone who wants to inspect what the engine actually validates against.
  */
 public record StrategyDetailResponse(
         UUID id,
@@ -50,13 +57,6 @@ public record StrategyDetailResponse(
          * therefore have no id. A non-empty list means the tree is broken.
          */
         List<String> unknownIndicators,
-
-        /**
-         * The flat knob set derived from the two lists above, in the shape the
-         * subscribe endpoint validates against. Kept because a subscribe request
-         * still sends one flat map; nothing here is authored directly.
-         */
-        List<StrategyParamDefResponse> params,
         long instanceCount,
         OffsetDateTime createdAt,
         OffsetDateTime updatedAt) {

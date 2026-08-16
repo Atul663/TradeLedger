@@ -464,10 +464,6 @@ public class StrategyDefinitionServiceImpl implements StrategyDefinitionService 
     // -------------------------------------------------------------- mapping
 
     private StrategyDetailResponse toResponse(Strategy strategy) {
-        List<StrategyParamDefResponse> params =
-                paramDefRepository.findByStrategy_IdOrderByDisplayOrderAscParameterKeyAsc(strategy.getId())
-                        .stream().map(this::toResponse).toList();
-
         // The hierarchy comes from the link tables, not the rule tree: one row per
         // indicator the strategy uses, each carrying its own parameters by id.
         List<IndicatorSummaryResponse> indicators = strategyIndicatorRepository
@@ -513,7 +509,6 @@ public class StrategyDefinitionServiceImpl implements StrategyDefinitionService 
                 indicators,
                 parameters,
                 unknown,
-                params,
                 instanceRepository.countByStrategy_Id(strategy.getId()),
                 strategy.getCreatedAt(),
                 strategy.getUpdatedAt());
