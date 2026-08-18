@@ -15,18 +15,18 @@ import java.time.OffsetDateTime;
  * from the indicator that computes with it. That is what makes the hierarchy
  * navigable by id in both directions - "which parameters does this indicator
  * have" and "where is this parameter used" are both index lookups against
- * {@link IndicatorParameter} / {@link StrategyParameter} rather than a scan of
+ * {@link IndicatorParameterLink} / {@link StrategyParameterLink} rather than a scan of
  * JSON documents.
  *
  * {@link #code} is the business key and the wire name: it is what a subscribe
- * request sends, what {@code strategy_param_defs.parameter_key} is generated
+ * request sends, what {@code strategy_param_definitions.parameter_key} is generated
  * from, and what a rule tree binds with {@code $code}. {@link #name} is the
  * human label and may be changed freely.
  *
  * {@link #scope} decides which side of the dedup line a value falls on, and is a
  * property of the parameter itself rather than of any one usage - {@code k} is
  * signal-scope wherever it appears, {@code sl} is execution-scope wherever it
- * appears. See {@link StrategyParamDef} for what that split buys.
+ * appears. See {@link StrategyParamDefinition} for what that split buys.
  *
  * Ranges and defaults live here as the canonical values, and may be narrowed per
  * usage on the link row - EMA and RSI can share a {@code period} parameter while
@@ -36,8 +36,8 @@ import java.time.OffsetDateTime;
 @Table(name = "parameters")
 public class Parameter {
 
-    public static final String SCOPE_SIGNAL = StrategyParamDef.SCOPE_SIGNAL;
-    public static final String SCOPE_EXECUTION = StrategyParamDef.SCOPE_EXECUTION;
+    public static final String SCOPE_SIGNAL = StrategyParamDefinition.SCOPE_SIGNAL;
+    public static final String SCOPE_EXECUTION = StrategyParamDefinition.SCOPE_EXECUTION;
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

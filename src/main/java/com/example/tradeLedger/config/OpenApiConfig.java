@@ -31,7 +31,7 @@ public class OpenApiConfig {
                 .info(new Info()
                         .title("TradeLedger API")
                         .version("v1")
-                        .description("Strategy configuration and trading control plane."))
+                        .description("StrategyTemplate configuration and trading control plane."))
                 .components(new Components()
                         .addSecuritySchemes(BEARER_SCHEME, new SecurityScheme()
                                 .type(SecurityScheme.Type.HTTP)

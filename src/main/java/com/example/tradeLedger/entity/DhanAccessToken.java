@@ -4,7 +4,7 @@ import jakarta.persistence.*;
 import java.time.OffsetDateTime;
 
 @Entity
-@Table(name = "dhan_access_token")
+@Table(name = "dhan_access_tokens")
 public class DhanAccessToken {
 
     @Id

@@ -175,7 +175,7 @@ CREATE TRIGGER trg_creds_touch BEFORE UPDATE ON account_credentials
 -- ---------------------------------------------------------------------------
 -- Strategy templates and their tunable knobs
 -- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS strategies (
+CREATE TABLE IF NOT EXISTS strategy_templates (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name        varchar(100) NOT NULL UNIQUE,
   version     int NOT NULL DEFAULT 1,
@@ -186,12 +186,12 @@ CREATE TABLE IF NOT EXISTS strategies (
   created_at  timestamptz NOT NULL DEFAULT now(),
   updated_at  timestamptz NOT NULL DEFAULT now()
 );
-DROP TRIGGER IF EXISTS trg_strategies_touch ON strategies;
-CREATE TRIGGER trg_strategies_touch BEFORE UPDATE ON strategies
+DROP TRIGGER IF EXISTS trg_strategy_templates_touch ON strategy_templates;
+CREATE TRIGGER trg_strategy_templates_touch BEFORE UPDATE ON strategy_templates
   FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
 
 -- Compute primitives (EMA, RSI, ...). One row + one O(1) engine class each.
-CREATE TABLE IF NOT EXISTS indicator_defs (
+CREATE TABLE IF NOT EXISTS indicators (
   id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name         varchar(50) NOT NULL UNIQUE,      -- 'EMA', 'RSI'
   param_schema jsonb NOT NULL,                   -- {"period":{"type":"int",...}}
@@ -203,9 +203,9 @@ CREATE TABLE IF NOT EXISTS indicator_defs (
 -- all live here identically - new strategies are INSERTs, never ALTER TABLE.
 -- scope drives the gap-#4 split: 'signal' -> instance (hashed),
 -- 'execution' -> subscription (personal).
-CREATE TABLE IF NOT EXISTS strategy_param_defs (
+CREATE TABLE IF NOT EXISTS strategy_param_definitions (
   id            bigserial PRIMARY KEY,
-  strategy_id   uuid NOT NULL REFERENCES strategies(id) ON DELETE CASCADE,
+  strategy_id   uuid NOT NULL REFERENCES strategy_templates(id) ON DELETE CASCADE,
   parameter_key varchar(100) NOT NULL,
   data_type     varchar(20) NOT NULL
                 CHECK (data_type IN ('int','decimal','bool','enum','timeframe','text')),
@@ -225,21 +225,21 @@ CREATE TABLE IF NOT EXISTS strategy_param_defs (
 -- A param change NEVER updates a row: insert new instance, repoint
 -- subscription, supersedes_id records lineage, refcount retires the old one.
 -- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS strategy_instances (
+CREATE TABLE IF NOT EXISTS shared_strategy_configs (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  strategy_id   uuid NOT NULL REFERENCES strategies(id),
+  strategy_id   uuid NOT NULL REFERENCES strategy_templates(id),
   symbol_id     uuid NOT NULL REFERENCES symbols(id),   -- SIGNAL symbol
   timeframe     varchar(20) NOT NULL,                   -- '5m','15m','1h',...
   signal_params jsonb NOT NULL,          -- canonicalized signal-scope params only
   config_hash   varchar(64) NOT NULL,
-  supersedes_id uuid REFERENCES strategy_instances(id),
+  supersedes_id uuid REFERENCES shared_strategy_configs(id),
   status        varchar(20) NOT NULL DEFAULT 'active'
                 CHECK (status IN ('active','retired')),
   created_at    timestamptz NOT NULL DEFAULT now(),
   UNIQUE (strategy_id, symbol_id, timeframe, config_hash)
 );
-CREATE INDEX IF NOT EXISTS idx_instances_params ON strategy_instances USING GIN (signal_params);
-CREATE INDEX IF NOT EXISTS idx_instances_active ON strategy_instances (strategy_id)
+CREATE INDEX IF NOT EXISTS idx_shared_configs_params ON shared_strategy_configs USING GIN (signal_params);
+CREATE INDEX IF NOT EXISTS idx_shared_configs_active ON shared_strategy_configs (strategy_id)
   WHERE status = 'active';
 
 -- Hash is set server-side from canonicalized params: the DB is the referee,
@@ -251,9 +251,166 @@ BEGIN
       NEW.strategy_id, NEW.symbol_id, NEW.timeframe, NEW.signal_params);
   RETURN NEW;
 END $$ LANGUAGE plpgsql;
-DROP TRIGGER IF EXISTS trg_instances_hash ON strategy_instances;
-CREATE TRIGGER trg_instances_hash BEFORE INSERT ON strategy_instances
+DROP TRIGGER IF EXISTS trg_shared_configs_hash ON shared_strategy_configs;
+CREATE TRIGGER trg_shared_configs_hash BEFORE INSERT ON shared_strategy_configs
   FOR EACH ROW EXECUTE FUNCTION set_config_hash();
+
+-- ---------------------------------------------------------------------------
+-- USER STRATEGIES - a user's customization of a global strategy template.
+--
+--   user_strategies  --> strategy_templates            which global strategy
+--        |
+--        +- user_strategy_indicators --> indicators    which indicator usages
+--        |        |
+--        |        +- user_strategy_parameters --> indicator_parameter_links
+--        |                                        the changed indicator values
+--        +- user_strategy_parameters --> parameters
+--                                        the changed strategy values (sl, tp...)
+--
+-- NO GLOBAL ROW IS EVER WRITTEN. Templates, indicators and the parameter catalog
+-- are shared by every user; these three tables hold foreign keys and the values
+-- the user actually changed. No default, label, data type or validation rule is
+-- copied down, so an admin retuning a global default moves every user who left
+-- that knob alone and moves nobody who overrode it.
+--
+-- A knob at its default has NO ROW in user_strategy_parameters. The effective
+-- value is resolved at read time:
+--     custom_value -> link default_value -> parameters.default_value
+-- which is what the user_strategy_effective_params view below does in one
+-- COALESCE.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS user_strategies (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id      uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  strategy_id  uuid NOT NULL REFERENCES strategy_templates(id),  -- no cascade: template in use
+  name         varchar(100) NOT NULL,        -- the user's own label
+  description  text,
+  symbol_id    uuid REFERENCES symbols(id),  -- nullable: pick the market at subscribe time
+  timeframe    varchar(20),
+  is_active    boolean NOT NULL DEFAULT true,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  updated_at   timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (user_id, name)          -- many customizations of one template, per user
+);
+CREATE INDEX IF NOT EXISTS idx_user_strategies_user     ON user_strategies (user_id);
+CREATE INDEX IF NOT EXISTS idx_user_strategies_template ON user_strategies (strategy_id);
+DROP TRIGGER IF EXISTS trg_user_strategies_touch ON user_strategies;
+CREATE TRIGGER trg_user_strategies_touch BEFORE UPDATE ON user_strategies
+  FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+-- One row per indicator USAGE. The FK is to indicators - authored master data -
+-- and not to strategy_indicator_links, which StrategyIndicatorLinkSync rebuilds
+-- from the rule tree on every template save; user rows must not hang off a table
+-- that regenerates. Membership of the template is checked when the row is written.
+--
+-- slot is null for every template that uses each indicator once, which is all of
+-- them today. It is in the unique key so a future strategy running two plain EMAs
+-- keeps them as distinct rows without a schema change.
+CREATE TABLE IF NOT EXISTS user_strategy_indicators (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_strategy_id uuid NOT NULL REFERENCES user_strategies(id) ON DELETE CASCADE,
+  indicator_id     uuid NOT NULL REFERENCES indicators(id),
+  slot             varchar(50),               -- 'fast' / 'slow', or NULL
+  is_enabled       boolean NOT NULL DEFAULT true,
+  display_order    int NOT NULL DEFAULT 0,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (user_strategy_id, indicator_id, slot)
+);
+CREATE INDEX IF NOT EXISTS idx_user_strategy_indicators_parent
+  ON user_strategy_indicators (user_strategy_id);
+
+-- ONE ROW PER VALUE THE USER CHANGED - nothing else lives here.
+--
+-- Two levels, told apart by user_strategy_indicator_id:
+--   set  -> an indicator knob (k, d); indicator_parameter_link_id names the
+--           default it displaces
+--   NULL -> a strategy knob (sl, tp, quantity, the durations)
+--
+-- custom_value is text for the same reason parameters.default_value is: one
+-- table holds int, decimal, bool, enum, timeframe and text knobs, and
+-- parameters.data_type is what coerces it. It is validated against that type and
+-- the validation rules in force before it is ever written.
+CREATE TABLE IF NOT EXISTS user_strategy_parameters (
+  id                          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_strategy_id            uuid NOT NULL REFERENCES user_strategies(id) ON DELETE CASCADE,
+  user_strategy_indicator_id  uuid REFERENCES user_strategy_indicators(id) ON DELETE CASCADE,
+  parameter_id                bigint NOT NULL REFERENCES parameters(id),
+  indicator_parameter_link_id bigint REFERENCES indicator_parameter_links(id),
+  custom_value                text NOT NULL,
+  created_at                  timestamptz NOT NULL DEFAULT now(),
+  updated_at                  timestamptz NOT NULL DEFAULT now()
+);
+
+-- One override per knob per level. Two partial indexes rather than one UNIQUE:
+-- Postgres treats NULLs as distinct, so a plain UNIQUE over a nullable column
+-- would happily let the same strategy knob be overridden twice.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_user_strategy_params_indicator
+  ON user_strategy_parameters (user_strategy_indicator_id, parameter_id)
+  WHERE user_strategy_indicator_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_user_strategy_params_strategy
+  ON user_strategy_parameters (user_strategy_id, parameter_id)
+  WHERE user_strategy_indicator_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_user_strategy_params_parent
+  ON user_strategy_parameters (user_strategy_id);
+
+DROP TRIGGER IF EXISTS trg_user_strategy_params_touch ON user_strategy_parameters;
+CREATE TRIGGER trg_user_strategy_params_touch BEFORE UPDATE ON user_strategy_parameters
+  FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+-- ---------------------------------------------------------------------------
+-- The effective-value read, for anything talking to the database directly.
+--
+-- The REST API is authoritative - GET /api/v1/my-strategies/{id}/runtime returns
+-- the same resolution with the engine's type coercion applied. This view exists
+-- so a bot or a report can answer "what does this user strategy actually run
+-- with" in one query, and it must be kept in step with
+-- UserStrategyServiceImpl.toKnob() if the fallback order ever changes.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE VIEW user_strategy_effective_params AS
+SELECT us.id                          AS user_strategy_id,
+       us.user_id,
+       us.strategy_id,
+       usi.id                         AS user_strategy_indicator_id,
+       i.id                           AS indicator_id,
+       i.name                         AS indicator_name,
+       usi.slot,
+       p.id                           AS parameter_id,
+       p.code                         AS parameter_code,
+       p.name                         AS parameter_label,
+       p.data_type,
+       p.scope,
+       COALESCE(usp.custom_value, ipl.default_value, p.default_value) AS effective_value,
+       COALESCE(ipl.default_value, p.default_value)                   AS default_value,
+       usp.custom_value,
+       (usp.id IS NOT NULL)                                           AS is_overridden,
+       ipl.display_order
+FROM user_strategies us
+JOIN user_strategy_indicators  usi ON usi.user_strategy_id = us.id AND usi.is_enabled
+JOIN indicators                i   ON i.id   = usi.indicator_id
+JOIN indicator_parameter_links ipl ON ipl.indicator_id = i.id
+JOIN parameters                p   ON p.id   = ipl.parameter_id
+LEFT JOIN user_strategy_parameters usp
+       ON usp.user_strategy_indicator_id = usi.id
+      AND usp.parameter_id = p.id
+
+UNION ALL
+
+-- Strategy-level knobs: no indicator, defaults from strategy_parameter_links.
+SELECT us.id, us.user_id, us.strategy_id,
+       NULL::uuid, NULL::uuid, NULL::varchar, NULL::varchar,
+       p.id, p.code, p.name, p.data_type, p.scope,
+       COALESCE(usp.custom_value, spl.default_value, p.default_value),
+       COALESCE(spl.default_value, p.default_value),
+       usp.custom_value,
+       (usp.id IS NOT NULL),
+       spl.display_order
+FROM user_strategies us
+JOIN strategy_parameter_links spl ON spl.strategy_id = us.strategy_id
+JOIN parameters               p   ON p.id = spl.parameter_id
+LEFT JOIN user_strategy_parameters usp
+       ON usp.user_strategy_id = us.id
+      AND usp.parameter_id = p.id
+      AND usp.user_strategy_indicator_id IS NULL;
 
 CREATE TABLE IF NOT EXISTS risk_profiles (
   id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -277,10 +434,10 @@ CREATE TRIGGER trg_riskprofiles_touch BEFORE UPDATE ON risk_profiles
 -- UNIQUE(instance, account) => one config on 2 accounts = 2 subscriptions
 -- = 2 independent positions => per-leg tracking by construction (edge #7).
 -- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS subscriptions (
+CREATE TABLE IF NOT EXISTS user_strategy_subscriptions (
   id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id              uuid NOT NULL REFERENCES users(id),
-  strategy_instance_id uuid NOT NULL REFERENCES strategy_instances(id),
+  shared_config_id uuid NOT NULL REFERENCES shared_strategy_configs(id),
   trading_account_id   uuid NOT NULL REFERENCES trading_accounts(id),
   risk_profile_id      uuid REFERENCES risk_profiles(id),
   quantity             numeric(20,8) NOT NULL DEFAULT 1,
@@ -299,13 +456,13 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   version              int NOT NULL DEFAULT 1,
   created_at           timestamptz NOT NULL DEFAULT now(),
   updated_at           timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (strategy_instance_id, trading_account_id)
+  UNIQUE (shared_config_id, trading_account_id)
 );
-CREATE INDEX IF NOT EXISTS idx_subs_user     ON subscriptions (user_id) WHERE is_active;
-CREATE INDEX IF NOT EXISTS idx_subs_instance ON subscriptions (strategy_instance_id)
+CREATE INDEX IF NOT EXISTS idx_user_strategy_subs_user ON user_strategy_subscriptions (user_id) WHERE is_active;
+CREATE INDEX IF NOT EXISTS idx_user_strategy_subs_config ON user_strategy_subscriptions (shared_config_id)
   WHERE is_active;
-DROP TRIGGER IF EXISTS trg_subs_touch ON subscriptions;
-CREATE TRIGGER trg_subs_touch BEFORE UPDATE ON subscriptions
+DROP TRIGGER IF EXISTS trg_user_strategy_subs_touch ON user_strategy_subscriptions;
+CREATE TRIGGER trg_user_strategy_subs_touch BEFORE UPDATE ON user_strategy_subscriptions
   FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
 
 -- ============================================================================
@@ -314,12 +471,12 @@ CREATE TRIGGER trg_subs_touch BEFORE UPDATE ON subscriptions
 -- idempotent, so running either (or both) is fine.
 -- ============================================================================
 
-INSERT INTO indicator_defs (name, param_schema) VALUES
+INSERT INTO indicators (name, param_schema) VALUES
   ('EMA', '{"period":{"type":"int","min":2,"max":300}}'),
   ('RSI', '{"period":{"type":"int","min":2,"max":100}}')
 ON CONFLICT (name) DO NOTHING;
 
-INSERT INTO strategies (id, name, description, rule_tree) VALUES
+INSERT INTO strategy_templates (id, name, description, rule_tree) VALUES
   ('00000000-0000-0000-0000-00000000e0a1', 'EMA Crossover',
    'Long when fast EMA crosses above slow EMA; exit on reverse cross or SL/TP.',
    '{"entry":{"cross_above":[{"ind":"EMA","params":{"period":"$fast"}},
@@ -332,12 +489,12 @@ ON CONFLICT (name) DO NOTHING;
 -- ControlPlaneSeeder already created the row on a previous boot it carries a
 -- generated uuid, and hard-coding the literal above would make these inserts
 -- fail on a foreign key. Either seeder can run first.
-INSERT INTO strategy_param_defs
+INSERT INTO strategy_param_definitions
   (strategy_id, parameter_key, data_type, scope, default_value, validation,
    display_label, display_order)
 SELECT s.id, v.parameter_key, v.data_type, v.scope, v.default_value,
        v.validation::jsonb, v.display_label, v.display_order
-FROM strategies s
+FROM strategy_templates s
 CROSS JOIN (VALUES
   ('fast',  'int',     'signal',    '9',   '{"min":2,"max":200}',             'Fast EMA period', 1),
   ('slow',  'int',     'signal',    '21',  '{"min":3,"max":300,"gt":"fast"}', 'Slow EMA period', 2),

@@ -1,6 +1,6 @@
 package com.example.tradeLedger.serviceImpl;
 
-import com.example.tradeLedger.entity.StrategyParamDef;
+import com.example.tradeLedger.entity.StrategyParamDefinition;
 import com.example.tradeLedger.exception.StrategyValidationException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -47,14 +47,14 @@ public class StrategyParamValidator {
         public Map<String, Object> getExecution() { return execution; }
     }
 
-    public ValidatedParams validate(List<StrategyParamDef> defs, Map<String, Object> submitted) {
+    public ValidatedParams validate(List<StrategyParamDefinition> defs, Map<String, Object> submitted) {
         if (defs == null || defs.isEmpty()) {
-            throw new StrategyValidationException("Strategy has no parameter definitions configured");
+            throw new StrategyValidationException("StrategyTemplate has no parameter definitions configured");
         }
         Map<String, Object> raw = submitted != null ? submitted : Map.of();
         List<String> errors = new ArrayList<>();
 
-        Map<String, StrategyParamDef> defByKey = new LinkedHashMap<>();
+        Map<String, StrategyParamDefinition> defByKey = new LinkedHashMap<>();
         defs.forEach(d -> defByKey.put(d.getParameterKey(), d));
 
         for (String key : raw.keySet()) {
@@ -65,7 +65,7 @@ public class StrategyParamValidator {
 
         // Pass 1: presence, defaults and type coercion.
         Map<String, Object> coerced = new LinkedHashMap<>();
-        for (StrategyParamDef def : defs) {
+        for (StrategyParamDefinition def : defs) {
             String key = def.getParameterKey();
             Object value = raw.get(key);
 
@@ -87,7 +87,7 @@ public class StrategyParamValidator {
         }
 
         // Pass 2: value constraints, including cross-field rules that need pass 1 complete.
-        for (StrategyParamDef def : defs) {
+        for (StrategyParamDefinition def : defs) {
             String key = def.getParameterKey();
             if (!coerced.containsKey(key)) {
                 continue;
@@ -101,12 +101,12 @@ public class StrategyParamValidator {
 
         Map<String, Object> signal = new TreeMap<>();
         Map<String, Object> execution = new TreeMap<>();
-        for (StrategyParamDef def : defs) {
+        for (StrategyParamDefinition def : defs) {
             Object value = coerced.get(def.getParameterKey());
             if (value == null) {
                 continue;
             }
-            if (StrategyParamDef.SCOPE_SIGNAL.equals(def.getScope())) {
+            if (StrategyParamDefinition.SCOPE_SIGNAL.equals(def.getScope())) {
                 signal.put(def.getParameterKey(), value);
             } else {
                 execution.put(def.getParameterKey(), value);
@@ -115,7 +115,7 @@ public class StrategyParamValidator {
         return new ValidatedParams(signal, execution);
     }
 
-    private Object coerce(StrategyParamDef def, Object value) {
+    private Object coerce(StrategyParamDefinition def, Object value) {
         String key = def.getParameterKey();
         String text = String.valueOf(value).trim();
 
@@ -152,7 +152,7 @@ public class StrategyParamValidator {
         }
     }
 
-    private List<String> checkConstraints(StrategyParamDef def, Object value, Map<String, Object> allValues) {
+    private List<String> checkConstraints(StrategyParamDefinition def, Object value, Map<String, Object> allValues) {
         List<String> errors = new ArrayList<>();
         Map<String, Object> rules = readJson(def.getValidation());
         if (rules.isEmpty()) {

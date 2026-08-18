@@ -1,6 +1,6 @@
 package com.example.tradeLedger;
 
-import com.example.tradeLedger.entity.StrategyParamDef;
+import com.example.tradeLedger.entity.StrategyParamDefinition;
 import com.example.tradeLedger.exception.StrategyValidationException;
 import com.example.tradeLedger.serviceImpl.StrategyParamValidator;
 import com.example.tradeLedger.serviceImpl.StrategyParamValidator.ValidatedParams;
@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Parameter validation is entirely data-driven: every rule below comes from
- * {@code strategy_param_defs} rows, not from EMA-specific code. An RSI or
+ * {@code strategy_param_definitions} rows, not from EMA-specific code. An RSI or
  * SuperTrend strategy validates through this same path the day its rows are
  * inserted, which is the property that lets new strategies ship as INSERTs.
  */
@@ -25,7 +25,7 @@ class StrategyParamValidatorTest {
     private final StrategyParamValidator validator = new StrategyParamValidator(new ObjectMapper());
 
     /** The EMA Crossover knob set, exactly as seeded. */
-    private static List<StrategyParamDef> emaCrossoverDefs() {
+    private static List<StrategyParamDefinition> emaCrossoverDefs() {
         return List.of(
                 def("fast", "int", "signal", "9", "{\"min\":2,\"max\":200}", 1),
                 def("slow", "int", "signal", "21", "{\"min\":3,\"max\":300,\"gt\":\"fast\"}", 2),
@@ -33,9 +33,9 @@ class StrategyParamValidatorTest {
                 def("tp_pct", "decimal", "execution", "3.0", "{\"min\":0.1,\"max\":50}", 4));
     }
 
-    private static StrategyParamDef def(String key, String dataType, String scope,
+    private static StrategyParamDefinition def(String key, String dataType, String scope,
                                         String defaultValue, String validation, int order) {
-        StrategyParamDef def = new StrategyParamDef();
+        StrategyParamDefinition def = new StrategyParamDefinition();
         def.setParameterKey(key);
         def.setDataType(dataType);
         def.setScope(scope);
@@ -110,7 +110,7 @@ class StrategyParamValidatorTest {
 
     @Test
     void enumTypeAcceptsOnlyDeclaredOptions() {
-        List<StrategyParamDef> defs = List.of(
+        List<StrategyParamDefinition> defs = List.of(
                 def("side", "enum", "signal", "LONG", "{\"options\":[\"LONG\",\"SHORT\"]}", 1));
 
         assertEquals("SHORT", validator.validate(defs, params("side", "SHORT")).getSignal().get("side"));
@@ -122,7 +122,7 @@ class StrategyParamValidatorTest {
 
     @Test
     void requiredParamWithoutDefaultMustBeSupplied() {
-        StrategyParamDef required = def("period", "int", "signal", null, null, 1);
+        StrategyParamDefinition required = def("period", "int", "signal", null, null, 1);
         StrategyValidationException e = assertThrows(StrategyValidationException.class,
                 () -> validator.validate(List.of(required), Map.of()));
 

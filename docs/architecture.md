@@ -42,13 +42,13 @@ That split is the axis the entire design turns on:
   ------------                          ---------------
   changes the math                      changes only your exit
   fast, slow, rsiLen                    sl_pct, tp_pct
-  stored on strategy_instances          stored on subscriptions
+  stored on shared_strategy_configs          stored on subscriptions
   INSIDE the config hash                NEVER hashed
   shared between users                  personal
 ```
 
 Which side a parameter falls on is not hardcoded anywhere — it is the `scope`
-column of a `strategy_param_defs` row. A new strategy is an INSERT, never a
+column of a `strategy_param_definitions` row. A new strategy is an INSERT, never a
 schema change.
 
 ---
@@ -61,11 +61,11 @@ The codebase contains two distinct worlds that share a database and a JWT.
 
 | Piece | Purpose |
 |---|---|
-| `UserDetails` → `user_details` | **The authentication table.** Google tokens, PAN card, revoked flag |
+| `GoogleAuthToken` → `google_auth_tokens` | **The authentication table.** Google tokens, PAN card, revoked flag |
 | `GoogleAuthController` `/api/v1/auth` | OAuth login, refresh, logout |
 | `JwtUtil`, `JwtFilter` | Issues and validates the access/refresh JWTs |
-| `StrategyConfig` → `strategy_config` | Old key/value strategy toggles |
-| `StrategyController` `/api/v1/strategy` (singular) | CRUD over `strategy_config` |
+| `PlatformStrategyToggle` → `platform_strategy_toggles` | Platform-wide on/off switches, keyed by an uppercased name string with no FK to `strategy_templates` |
+| `PlatformStrategyToggleController` `/api/v1/strategy-toggles` | CRUD over those switches. `PUT /{name}/toggle` is **mutually exclusive** — enabling one disables every other |
 | `DhanAccessToken`, `DhanTokenService` | Dhan broker token renewal |
 
 ### B. Control plane / strategy module (the new work)
@@ -74,21 +74,24 @@ The codebase contains two distinct worlds that share a database and a JWT.
 |---|---|
 | `User` → `users` | Control-plane identity, **not** the login table |
 | `Exchange`, `Symbol` | Venue and contract master |
-| `IndicatorDef` → `indicator_defs` | Compute primitives (EMA, RSI) |
-| `Strategy` → `strategies` | Strategy template — the rule tree |
+| `Indicator` → `indicators` | Compute primitives (EMA, RSI) |
+| `StrategyTemplate` → `strategy_templates` | Strategy template — the rule tree |
 | `Parameter` → `parameters` | The parameter catalog — one row per distinct knob |
-| `IndicatorParameter` → `indicator_parameters` | Indicator ↔ parameter, by id |
-| `StrategyParameter` → `strategy_parameters` | Strategy ↔ parameter, by id |
-| `StrategyParamDef` → `strategy_param_defs` | Derived flat knob set the engine validates against |
-| `StrategyIndicator` → `strategy_indicators` | Derived index: which indicators a strategy uses, as FKs |
-| `StrategyInstance` → `strategy_instances` | Immutable shared config (the dedup unit) |
-| `Subscription` → `subscriptions` | A user's personal leg |
+| `IndicatorParameterLink` → `indicator_parameter_links` | Indicator ↔ parameter, by id |
+| `StrategyParameterLink` → `strategy_parameter_links` | Strategy ↔ parameter, by id |
+| `StrategyParamDefinition` → `strategy_param_definitions` | Derived flat knob set the engine validates against |
+| `StrategyIndicatorLink` → `strategy_indicator_links` | Derived index: which indicators a strategy uses, as FKs |
+| `SharedStrategyConfig` → `shared_strategy_configs` | Immutable shared config (the dedup unit) |
+| `StrategySubscription` → `user_strategy_subscriptions` | A user's personal leg |
+| `UserStrategy` → `user_strategies` | A user's customization of a template — FKs only, no copied master data |
+| `UserStrategyIndicator` → `user_strategy_indicators` | Which indicator usages that customization carries |
+| `UserStrategyParameter` → `user_strategy_parameters` | ONE ROW PER CHANGED VALUE; a knob left at its default has none |
 | `TradingAccount`, `AccountCredential` | Broker accounts + Vault pointer |
 | `RiskProfile`, `UserRiskLimit` | Per-subscription and per-user caps |
 
 ### The bridge between them
 
-`user_details` (auth) and `users` (control plane) are **different tables with no
+`google_auth_tokens` (auth) and `users` (control plane) are **different tables with no
 FK between them**. The only link is the email string:
 
 ```
@@ -126,14 +129,15 @@ SecurityConfig ────────── /v3/api-docs, /swagger-ui**  → p
 Controller ────────────── extends SecuredController
    │                      currentEmail() → 401 if principal missing/anonymous
    ▼
-Service interface ─────── IndicatorDefinitionService, StrategyDefinitionService,
-   │                      StrategyInstanceService, SubscriptionService,
+Service interface ─────── IndicatorCatalogService, StrategyTemplateService,
+   │                      SharedStrategyConfigService, StrategySubscriptionService,
+   │                      UserStrategyService,
    │                      TradingAccountService, ReferenceDataService,
    │                      CurrentUserService
    ▼
 ServiceImpl ───────────── business rules, @Transactional boundary
    │
-   ├── StrategyDefinitionValidator ── rule tree + knob-definition structure
+   ├── StrategyTemplateValidator ── rule tree + knob-definition structure
    ├── StrategyParamValidator ─────── submitted values: coerce, constrain, split
    ├── IndicatorResolver ──────────── reads the rule tree
    ├── CanonicalJson / ConfigHashUtil ─ content addressing
@@ -187,9 +191,9 @@ UNIQUE `(exchange_id, symbol)`.
 | `active` | Inactive symbols are refused at subscribe time |
 
 > Convention: indicators run on the **underlying** (spot/index).
-> `StrategyInstance.symbol` is the *signal* symbol, not the traded contract.
+> `SharedStrategyConfig.symbol` is the *signal* symbol, not the traded contract.
 
-### `indicator_defs` — compute primitives (`IndicatorDef.java`)
+### `indicators` — compute primitives (`Indicator.java`)
 
 | Field | Stores |
 |---|---|
@@ -204,7 +208,7 @@ UNIQUE `(exchange_id, symbol)`.
 (numeric) and `options` (non-empty list). `default` is accepted and stored but
 not validated.
 
-### `strategies` — the template (`Strategy.java`)
+### `strategy_templates` — the template (`StrategyTemplate.java`)
 
 | Field | Stores |
 |---|---|
@@ -217,11 +221,11 @@ not validated.
 | `ruleTree` | jsonb. **Where the strategy↔indicator link lives** |
 | `createdAt`, `updatedAt` | Timestamps |
 
-### `strategy_param_defs` — the derived knob set (`StrategyParamDef.java`)
+### `strategy_param_definitions` — the derived knob set (`StrategyParamDefinition.java`)
 
 > **Derived, not authored.** Since the parameter catalog landed, these rows are
-> generated by `StrategyParameterSync` from `indicator_parameters` +
-> `strategy_parameters` on every strategy save. They remain the engine's input —
+> generated by `StrategyParameterLinkSync` from `indicator_parameter_links` +
+> `strategy_parameter_links` on every strategy save. They remain the engine's input —
 > `StrategyParamValidator` validates against them and the config hash is computed
 > from them — but the catalog is where parameters are authored.
 
@@ -231,7 +235,7 @@ the hot path.
 
 | Field | Stores |
 |---|---|
-| `strategy` | FK → strategies |
+| `strategy` | FK → strategy_templates |
 | `parameterKey` | Strategy-local name: `fast`, `slow`, `sl_pct`. `fast` in two strategies does not collide |
 | `dataType` | `int` / `decimal` / `bool` / `enum` / `timeframe` / `text` |
 | `scope` | **`signal`** (hashed, shared) or **`execution`** (personal, never hashed) |
@@ -256,27 +260,27 @@ One row per distinct knob the platform knows about, with a stable id.
 | `universal` | Auto-attached to every strategy (SL, TP, quantity, the durations) |
 | `system` | Platform-supplied, protected from edit |
 
-### `indicator_parameters` — indicator ↔ parameter (`IndicatorParameter.java`)
+### `indicator_parameter_links` — indicator ↔ parameter (`IndicatorParameterLink.java`)
 
 UNIQUE `(indicator_id, parameter_id)`. Carries optional `default_value` /
 `validation` overrides, which is what lets EMA and RSI share one `period` catalog
 row while declaring different maxima. Plus `display_order` and `is_required`.
 
-### `strategy_parameters` — strategy ↔ parameter (`StrategyParameter.java`)
+### `strategy_parameter_links` — strategy ↔ parameter (`StrategyParameterLink.java`)
 
 UNIQUE `(strategy_id, parameter_id)`, same override columns. Rows for
-`universal` parameters are written automatically by `StrategyParameterSync`, so
+`universal` parameters are written automatically by `StrategyParameterLinkSync`, so
 every strategy carries SL/TP/quantity without anyone linking them by hand — and
 they are still real rows, so the hierarchy is uniform.
 
-### `strategy_instances` — the dedup unit (`StrategyInstance.java`)
+### `shared_strategy_configs` — the dedup unit (`SharedStrategyConfig.java`)
 
 UNIQUE `(strategy_id, symbol_id, timeframe, config_hash)`.
 
 | Field | Stores |
 |---|---|
 | `id` | UUID PK |
-| `strategy` | FK → strategies |
+| `strategy` | FK → strategy_templates |
 | `symbol` | FK → symbols — the **signal** symbol |
 | `timeframe` | `5m`, `15m`, `1h` … |
 | `signalParams` | jsonb, canonicalized, **signal scope only**: `{"fast": 9, "slow": 21}` |
@@ -289,9 +293,9 @@ UNIQUE `(strategy_id, symbol_id, timeframe, config_hash)`.
 the subscription is repointed, `supersedes` records the lineage, and the orphan
 is retired once its last active subscriber leaves.
 
-### `subscriptions` — the personal leg (`Subscription.java`)
+### `user_strategy_subscriptions` — the personal leg (`StrategySubscription.java`)
 
-UNIQUE `(strategy_instance_id, trading_account_id)` — the same math on the same
+UNIQUE `(shared_config_id, trading_account_id)` — the same math on the same
 account is one leg, so a repeat is an update, not a second row.
 
 | Field | Stores |
@@ -319,9 +323,9 @@ account is one leg, so a repeat is an update, not a second row.
 | `AccountCredential` → `account_credentials` | 1:1 with a trading account. **`vaultRef` only** — no api_key/secret columns, so a DB dump leaks nothing |
 | `RiskProfile` → `risk_profiles` | Reusable per-subscription caps: `maxDailyLoss`, `maxDrawdown`, `maxPositionSize`, `maxTotalExposure`, `maxTradesPerDay`, `killSwitchEnabled` |
 | `UserRiskLimit` → `user_risk_limits` | **PK is `user_id`** — one row per user. Aggregate caps: `maxDailyLoss`, `maxOpenPositions`, `maxTotalExposure`. Exists because ten subscriptions would otherwise mean ten independent daily-loss limits and no total |
-| `UserDetails` → `user_details` | Auth only: `email`, `accessToken`, `refreshToken`, `panCard`, `revoked`, `createdAt` |
-| `StrategyConfig` → `strategy_config` | Legacy: `strategyName` (uppercased, UNIQUE), `enabled`, `configJson`, `updatedAt` |
-| `DhanAccessToken` → `dhan_access_token` | `accessToken`, `dhanClientId`, `expiryTime` |
+| `GoogleAuthToken` → `google_auth_tokens` | Auth only: `email`, `accessToken`, `refreshToken`, `panCard`, `revoked`, `createdAt` |
+| `StrategyConfig` → `platform_strategy_toggles` | Legacy: `strategyName` (uppercased, UNIQUE), `enabled`, `configJson`, `updatedAt` |
+| `DhanAccessToken` → `dhan_access_tokens` | `accessToken`, `dhanClientId`, `expiryTime` |
 
 ---
 
@@ -330,31 +334,32 @@ account is one leg, so a repeat is an update, not a second row.
 Every edge is a foreign key. Nothing in the hierarchy is a name string.
 
 ```
-                      ┌──────────────┐
-                      │  strategies  │
-                      └──────┬───────┘
-                             │
-              ┌──────────────┴──────────────┐
-              │                             │
-   ┌──────────▼───────────┐     ┌───────────▼──────────┐
-   │ strategy_indicators  │     │ strategy_parameters  │
-   │ strategy_id ─┐       │     │ strategy_id ─┐       │
-   │ indicator_id─┼───┐   │     │ parameter_id─┼───┐   │
-   └──────────────┘   │   │     └──────────────┘   │   │
-                      │   │                        │   │
-           ┌──────────▼───┴──┐                     │   │
-           │ indicator_defs  │                     │   │
-           └────────┬────────┘                     │   │
-                    │                              │   │
-      ┌─────────────▼──────────┐                   │   │
-      │ indicator_parameters   │                   │   │
-      │ indicator_id ─┘        │                   │   │
-      │ parameter_id ──────────┼───────────────┐   │   │
-      └────────────────────────┘               │   │   │
-                                          ┌────▼───▼───▼─┐
-                                          │  parameters  │
-                                          │  (catalog)   │
-                                          └──────────────┘
+                        ┌─────────────────────┐
+                        │  strategy_templates │
+                        └──────────┬──────────┘
+                                   │
+            ┌──────────────────────┴──────────────────────┐
+            │                                             │
+┌───────────▼────────────────┐          ┌─────────────────▼────────────┐
+│ strategy_template_         │          │ strategy_template_           │
+│            indicators      │          │            parameters        │
+│ strategy_id ─┐             │          │ strategy_id ─┐               │
+│ indicator_id─┼───┐         │          │ parameter_id─┼───┐           │
+└──────────────┘   │         │          └──────────────┘   │           │
+                   │         │                             │           │
+        ┌──────────▼───┴──┐  │                             │           │
+        │ indicators  │  │                             │           │
+        └────────┬────────┘  │                             │           │
+                 │           │                             │           │
+   ┌─────────────▼──────────┐│                             │           │
+   │ indicator_parameter_links   ││                             │           │
+   │ indicator_id ─┘        ││                             │           │
+   │ parameter_id ──────────┼┼──────────────────────┐      │           │
+   └────────────────────────┘│                      │      │           │
+                             │                 ┌────▼──────▼───────────▼─┐
+                             └────────────────►│      parameters         │
+                                               │      (catalog)          │
+                                               └─────────────────────────┘
 ```
 
 Seeded shape:
@@ -362,33 +367,33 @@ Seeded shape:
 ```
 EMA Crossover (strategy)
 │
-├── EMA CROSSOVER (indicator)      via strategy_indicators
-│     ├── K                        via indicator_parameters
+├── EMA CROSSOVER (indicator)      via strategy_indicator_links
+│     ├── K                        via indicator_parameter_links
 │     └── D
 │
-├── SL              universal      via strategy_parameters
+├── SL              universal      via strategy_parameter_links
 ├── TP              universal
 ├── Quantity        universal
 ├── Candle Duration universal
 └── Trigger Duration universal
 ```
 
-**Ownership is explicit.** A parameter reached through `indicator_parameters`
+**Ownership is explicit.** A parameter reached through `indicator_parameter_links`
 configures a computation and is signal scope. One reached through
-`strategy_parameters` configures execution. That distinction is a property of the
+`strategy_parameter_links` configures execution. That distinction is a property of the
 catalog row (`parameters.scope`), so it holds wherever the parameter appears.
 
 The `rule_tree` still exists and still binds `$code` placeholders onto indicator
 inputs — it is *how* the strategy wires its indicator up, and it is what
-`strategy_indicators` is derived from. But it is no longer how anything is
+`strategy_indicator_links` is derived from. But it is no longer how anything is
 *discovered*: the frontend reads the link tables.
 
 ```
-strategies.rule_tree
+strategy_templates.rule_tree
 {"entry":{"ind":"EMA CROSSOVER","params":{"k":"$k","d":"$d"}}}
              │                              │
    indexed into                  resolved against the knob set
-   strategy_indicators           derived from the catalog
+   strategy_indicator_links           derived from the catalog
 ```
 
 ### Three things `IndicatorResolver` derives
@@ -417,17 +422,17 @@ strategies is one computation.
 | Indicator delete | Refused while referenced | 409 → deactivate instead |
 | Knob delete | Refused while the tree binds `$key` | 409 |
 
-### 5.1 The derived index — `strategy_indicators`
+### 5.1 The derived index — `strategy_indicator_links`
 
 A join table with real FKs, **rebuilt from the rule tree on every strategy save**
-by `StrategyIndicatorSync`, and rebuilt for every strategy at startup by
+by `StrategyIndicatorLinkSync`, and rebuilt for every strategy at startup by
 `ControlPlaneSeeder` so seeded rows and direct SQL inserts are covered.
 
 | Field | Stores |
 |---|---|
 | `id` | UUID PK |
-| `strategy` | FK → strategies |
-| `indicator` | FK → indicator_defs |
+| `strategy` | FK → strategy_templates |
+| `indicator` | FK → indicators |
 | `createdAt` | Timestamp |
 
 UNIQUE `(strategy_id, indicator_id)`. It records **which** indicators a strategy
@@ -449,7 +454,7 @@ way to name something the pair already names unambiguously.
 
 Guards
 (`usedByStrategies`, the delete and rename refusals in
-`IndicatorDefinitionServiceImpl`) still scan rule trees directly — unchanged, and
+`IndicatorCatalogServiceImpl`) still scan rule trees directly — unchanged, and
 correct even if the index were ever stale.
 
 ---
@@ -465,7 +470,7 @@ GET /api/v1/auth/google
 GET /api/v1/auth/callback?code=…&state=…
       → exchange code for Google tokens
       → fetch email from googleapis userinfo
-      → UserDetailsService.saveOrUpdateToken(email, access, refresh)
+      → GoogleAuthTokenService.saveOrUpdateToken(email, access, refresh)
       → set cookie refresh_token  (httpOnly, Secure, SameSite=None, 7 days)
       → redirect to <frontend>/create-plan
 
@@ -473,7 +478,7 @@ GET /api/v1/auth/me           reads the cookie
       → {email, accessToken, hasPanCard}      accessToken lives 30 minutes
 
 POST /api/v1/auth/refresh     reads the cookie → {accessToken}
-POST /api/v1/auth/logout      sets user_details.revoked = true, clears cookie
+POST /api/v1/auth/logout      sets google_auth_tokens.revoked = true, clears cookie
 ```
 
 Every other endpoint expects `Authorization: Bearer <accessToken>`.
@@ -492,7 +497,7 @@ Every other endpoint expects `Authorization: Bearer <accessToken>`.
 6. response includes usedByStrategies (computed by scanning strategies)
 ```
 
-### 6.3 Create a strategy — `POST /api/v1/strategies`
+### 6.3 Create a strategy — `POST /api/v1/strategy-templates`
 
 ```
 1. name required, ≤ 100 chars; version ≥ 1 if supplied
@@ -511,9 +516,9 @@ Every other endpoint expects `Authorization: Bearer <accessToken>`.
 with 409. Supplying `params` **replaces** the knob set — key by key, so ids stay
 stable and a partial failure cannot leave a strategy with zero parameters.
 
-`DELETE` is refused while any `strategy_instances` row references the strategy.
+`DELETE` is refused while any `shared_strategy_configs` row references the strategy.
 
-### 6.4 Subscribe — `POST /api/v1/subscriptions` (the main flow)
+### 6.4 Subscribe — `POST /api/v1/my-subscriptions` (the main flow)
 
 ```
  email ─→ CurrentUserService.require()  ──────────→ users row (lazily provisioned)
@@ -534,14 +539,14 @@ stable and a partial failure cannot leave a strategy with zero parameters.
         │           missing + default → fill;  missing + required → error
         │           coerce by dataType (int → longValueExact, decimal → BigDecimal…)
         │  pass 2 ─ options / min / max / gt / lt   (cross-field needs pass 1 done)
-        │  split  ─ by strategy_param_defs.scope, into two sorted TreeMaps
+        │  split  ─ by strategy_param_definitions.scope, into two sorted TreeMaps
         ▼
    signal {fast:9, slow:21}          execution {sl_pct:1.5, tp_pct:3.0}
         │                                        │
         │  assertRuleTreeResolves()              │
         │  (catches a $key with no signal param) │
         ▼                                        │
- StrategyInstanceService.resolveOrCreate()       │
+ SharedStrategyConfigService.resolveOrCreate()   │
         │                                        │
         │  canonical = CanonicalJson(signal)     │
         │  hash = sha256(strategyId|symbolId|timeframe|canonical)
@@ -549,7 +554,7 @@ stable and a partial failure cannot leave a strategy with zero parameters.
         │      found  → revive if retired, reuse   ← SHARING HAPPENS HERE
         │      absent → INSERT new instance
         ▼                                        │
-   strategy_instances row  ◄─────────────────────┘
+   shared_strategy_configs row  ◄─────────────────────┘
         │
         ▼
  UNIQUE(instance, account) check → already active? 409 with the existing id
@@ -558,7 +563,7 @@ stable and a partial failure cannot leave a strategy with zero parameters.
  INSERT subscriptions row  (quantity, multiplier, execParams, tradeMode, …)
 ```
 
-### 6.5 Update a subscription — `PUT /api/v1/subscriptions/{id}`
+### 6.5 Update a subscription — `PUT /api/v1/my-subscriptions/{id}`
 
 Partial. Submitted keys are **merged over the current effective config**, so
 `{"params":{"fast":13}}` is valid and leaves every other knob untouched.
@@ -583,20 +588,20 @@ active flag flipped ?
    false → retireIfOrphaned(instance)
 ```
 
-### 6.6 Unsubscribe — `DELETE /api/v1/subscriptions/{id}`
+### 6.6 Unsubscribe — `DELETE /api/v1/my-subscriptions/{id}`
 
 Delete the row, `flush()`, then `retireIfOrphaned(instanceId)`. An instance is
-retired — never deleted — when `countByStrategyInstance_IdAndActiveTrue` hits 0,
+retired — never deleted — when `countBySharedStrategyConfig_IdAndActiveTrue` hits 0,
 so lineage and history survive.
 
-### 6.7 The dedup report — `GET /api/v1/strategy-instances/indicator-plan`
+### 6.7 The dedup report — `GET /api/v1/shared-strategy-configs/indicator-plan`
 
 Walks every active instance, sums active subscribers, and unions their resolved
 fingerprints into a `TreeSet`. The design's acceptance gate: three users on 9x21,
 9x50 and 13x21 must report **3 subscriptions, 3 instances, 4 indicators** — not 6.
 
 ```json
-{ "activeSubscriptions": 3, "distinctInstances": 3, "distinctIndicators": 4,
+{ "activeStrategySubscriptions": 3, "distinctInstances": 3, "distinctIndicators": 4,
   "indicators": ["EMA(period=13)","EMA(period=21)","EMA(period=50)","EMA(period=9)"] }
 ```
 
@@ -639,7 +644,7 @@ two users with different stop losses share one computation.
 
 | Class | Validates | When |
 |---|---|---|
-| `StrategyDefinitionValidator` | **Structure** — rule trees, knob *definitions*, indicator *schemas* | Author-time (create/update a strategy or indicator) |
+| `StrategyTemplateValidator` | **Structure** — rule trees, knob *definitions*, indicator *schemas* | Author-time (create/update a strategy or indicator) |
 | `StrategyParamValidator` | **Values** — a submitted param map against the knob definitions; coerces, defaults, splits by scope | Subscribe-time |
 
 Nothing in either is EMA-specific. An RSI strategy validates through the same
@@ -668,8 +673,8 @@ confusing failure at commit. The caller gets a 409 and the retry succeeds.
 ### Seeding (`ControlPlaneSeeder`)
 
 An `ApplicationRunner` that runs on every boot and is idempotent — it keys on
-unique business columns (`parameters.code`, `indicator_defs.name`,
-`strategies.name`, and the two link-table unique constraints):
+unique business columns (`parameters.code`, `indicators.name`,
+`strategy_templates.name`, and the two link-table unique constraints):
 
 1. **Catalog** — `k`, `d`, `period` (signal); `sl`, `tp`, `quantity`,
    `candle_duration`, `trigger_duration` (execution, all `universal`)
@@ -678,7 +683,7 @@ unique business columns (`parameters.code`, `indicator_defs.name`,
 3. **Strategy** — `EMA Crossover`, `system = true`, rule tree
    `{"entry":{"ind":"EMA CROSSOVER","params":{"k":"$k","d":"$d"}}}`
 4. `indicatorSync.syncAll()` then `parameterSync.syncAll()` — index the rule
-   trees, attach universal parameters, derive `strategy_param_defs`
+   trees, attach universal parameters, derive `strategy_param_definitions`
 
 The seeder also **converges** a pre-catalog EMA Crossover onto the new rule tree —
 but only when the strategy has zero instances, since rewriting the tree under
@@ -703,18 +708,23 @@ All strategy-module endpoints require `Authorization: Bearer <accessToken>`.
 | GET | `/api/v1/parameters/{id}`, `/by-code/{code}` | One parameter |
 | GET | `/api/v1/parameters/{id}/usage` | Every indicator and strategy using it |
 | GET | `/api/v1/indicators/{id}/parameters` | An indicator's parameters, by id |
-| GET | `/api/v1/strategies/{id}/parameters` | A strategy's own parameters, by id |
-| GET | `/api/v1/strategies?active=&search=` | Returns `StrategyDetailResponse` — the full hierarchy |
-| GET | `/api/v1/strategies/{id}`, `/by-name/{name}` | |
-| POST | `/api/v1/strategies` | 201, `is_system` forced false |
-| PUT / DELETE | `/api/v1/strategies/{id}` | 409 on system rows |
-| GET/POST | `/api/v1/strategies/{id}/params` | Knob CRUD |
-| PUT/DELETE | `/api/v1/strategies/{id}/params/{paramId}` | |
-| GET | `/api/v1/strategy-instances?status=` | |
-| GET | `/api/v1/strategy-instances/{id}` | |
-| GET | `/api/v1/strategy-instances/indicator-plan` | Dedup report |
-| GET/POST | `/api/v1/subscriptions` | Ownership-filtered |
-| GET/PUT/DELETE | `/api/v1/subscriptions/{id}` | Another user's row reports **404, not 403** |
+| GET | `/api/v1/strategy-templates/{id}/parameters` | A strategy's own parameters, by id |
+| GET | `/api/v1/strategy-templates?active=&search=` | Returns `StrategyTemplateDetailResponse` — the full hierarchy |
+| GET | `/api/v1/strategy-templates/{id}`, `/by-name/{name}` | |
+| POST | `/api/v1/strategy-templates` | 201, `is_system` forced false |
+| PUT / DELETE | `/api/v1/strategy-templates/{id}` | 409 on system rows |
+| GET/POST | `/api/v1/strategy-templates/{id}/params` | Knob CRUD |
+| PUT/DELETE | `/api/v1/strategy-templates/{id}/params/{paramId}` | |
+| GET | `/api/v1/shared-strategy-configs?status=` | |
+| GET | `/api/v1/shared-strategy-configs/{id}` | |
+| GET | `/api/v1/shared-strategy-configs/indicator-plan` | Dedup report |
+| GET/POST | `/api/v1/my-strategies` | A user's customized strategies, ownership-filtered |
+| GET/PUT/DELETE | `/api/v1/my-strategies/{id}` | UI shape: defaults and overrides side by side. Another user's row reports **404, not 403** |
+| GET | `/api/v1/my-strategies/{id}/runtime` | Bot shape: effective values, signal/execution split |
+| POST | `/api/v1/my-strategies/{id}/subscribe` | 201, projects the effective values onto a subscription |
+| GET/POST | `/api/v1/my-subscriptions` | Ownership-filtered |
+| GET/POST/PUT/DELETE | `/api/v1/strategy-toggles/...` | Legacy platform switches, unrelated to templates |
+| GET/PUT/DELETE | `/api/v1/my-subscriptions/{id}` | Another user's row reports **404, not 403** |
 | GET/POST | `/api/v1/trading-accounts` | |
 | GET/PUT/DELETE | `/api/v1/trading-accounts/{id}` | |
 | GET | `/api/v1/exchanges`, `/symbols`, `/risk-profiles` | Reference data |
@@ -730,13 +740,13 @@ foreign resource is a 404 rather than a 403 — the API does not confirm it exis
 1. **`users.id` type collision.** The deployed database has a `users` table whose
    `id` is a `bigint` identity column, but `User.java` declares `UUID`.
    `ddl-auto=update` cannot convert it, so the ALTER fails at boot and the FKs
-   `subscriptions.user_id` and `trading_accounts.user_id` are never created.
+   `user_strategy_subscriptions.user_id` and `trading_accounts.user_id` are never created.
    Writes that provision a user row will fail until the table is rebuilt.
 
 2. **`ddl-auto=update` hides failed migrations.** Schema drift surfaces as a WARN
    in the startup log, never an error. Worth replacing with Flyway/Liquibase.
 
-3. **The `trg_instances_hash` trigger does not exist under `ddl-auto`.** The code
+3. **The `trg_shared_configs_hash` trigger does not exist under `ddl-auto`.** The code
    documents Postgres as "the referee" for `config_hash`, but the schema SQL that
    creates `canonical_jsonb()`, `compute_config_hash()` and the trigger is not in
    this repository. In practice the application-computed hash is the only one in
@@ -752,6 +762,6 @@ foreign resource is a 404 rather than a 403 — the API does not confirm it exis
    layer instead. It works, but a new controller under `/api/v1` that forgets to
    extend `SecuredController` is silently public.
 
-6. **Two DTOs named alike.** `StrategyDetailResponse` (used by `/api/v1/strategies`,
+6. **Two DTOs named alike.** `StrategyTemplateDetailResponse` (used by `/api/v1/strategy-templates`,
    plural) versus `StrategyResponse` (used by `/api/v1/strategy`, singular, the
-   legacy `strategy_config` controller). Only the former has `indicators`.
+   legacy `platform_strategy_toggles` controller). Only the former has `indicators`.

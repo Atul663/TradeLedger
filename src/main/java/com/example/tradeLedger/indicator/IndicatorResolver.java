@@ -14,7 +14,7 @@ import java.util.Set;
  * Three things are derivable from it, and this class is the only place that
  * knows the tree's shape:
  * <ul>
- *   <li>{@link #indicatorNames} - which indicator_defs a strategy depends on
+ *   <li>{@link #indicatorNames} - which indicators a strategy depends on
  *       ({@code ["EMA"]}), used to validate a rule tree at save time</li>
  *   <li>{@link #bindings} - which {@code $key} placeholders it expects
  *       ({@code ["fast","slow"]}), used to check the strategy's knob set covers them</li>

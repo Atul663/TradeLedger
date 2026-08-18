@@ -12,8 +12,9 @@ implemented here, and neither is any bot / signal-evaluation logic.
 
 ## 1. Entity → table mapping
 
-Every name below is taken verbatim from the SQL file. Nothing was renamed,
-pluralized or abbreviated.
+Every name below is taken verbatim from the SQL file. Entity and table names
+move together — see `db/control-plane-rename-migration.sql` for the one-off
+migration that renamed the strategy-module tables.
 
 | Java entity | Table | PK | Notes |
 |---|---|---|---|
@@ -23,20 +24,28 @@ pluralized or abbreviated.
 | `Symbol` | `symbols` | `id` uuid | `UNIQUE (exchange_id, symbol)` |
 | `TradingAccount` | `trading_accounts` | `id` uuid | `UNIQUE (user_id, exchange_id, account_name)` |
 | `AccountCredential` | `account_credentials` | `id` uuid | 1:1, `vault_ref` only — no secrets |
-| `Strategy` | `strategies` | `id` uuid | `name` unique; `rule_tree` jsonb |
-| `IndicatorDef` | `indicator_defs` | `id` uuid | `param_schema` jsonb; no `updated_at` |
-| `StrategyParamDef` | `strategy_param_defs` | `id` bigserial | `UNIQUE (strategy_id, parameter_key)` |
-| `StrategyInstance` | `strategy_instances` | `id` uuid | `UNIQUE (strategy_id, symbol_id, timeframe, config_hash)` |
+| `StrategyTemplate` | `strategy_templates` | `id` uuid | `name` unique; `rule_tree` jsonb |
+| `Indicator` | `indicators` | `id` uuid | `param_schema` jsonb; no `updated_at` |
+| `StrategyParamDefinition` | `strategy_param_definitions` | `id` bigserial | `UNIQUE (strategy_id, parameter_key)` |
+| `SharedStrategyConfig` | `shared_strategy_configs` | `id` uuid | `UNIQUE (strategy_id, symbol_id, timeframe, config_hash)` |
 | `RiskProfile` | `risk_profiles` | `id` uuid | |
-| `Subscription` | `subscriptions` | `id` uuid | `UNIQUE (strategy_instance_id, trading_account_id)` |
+| `StrategySubscription` | `user_strategy_subscriptions` | `id` uuid | `UNIQUE (shared_config_id, trading_account_id)` |
+| `UserStrategy` | `user_strategies` | `id` uuid | `UNIQUE (user_id, name)` — FKs only, no copied master data |
+| `UserStrategyIndicator` | `user_strategy_indicators` | `id` uuid | `UNIQUE (user_strategy_id, indicator_id, slot)` |
+| `UserStrategyParameter` | `user_strategy_parameters` | `id` uuid | One row per CHANGED value; two partial unique indexes |
+| `StrategyIndicatorLink` | `strategy_indicator_links` | `id` uuid | Derived: which indicators a template uses |
+| `StrategyParameterLink` | `strategy_parameter_links` | `id` bigserial | Template ↔ `parameters` catalog |
+| `IndicatorParameterLink` | `indicator_parameter_links` | `id` bigserial | Indicator ↔ `parameters` catalog |
+| `GoogleAuthToken` | `google_auth_tokens` | `id` bigserial | OAuth session store; **not** a profile table |
 
 Column names map 1:1 (`is_active` → `active`, `is_system` → `system`,
 `is_required` → `required` on the Java side only; the `@Column(name = ...)` is
 always the SQL name). Verified by generating the Hibernate DDL and diffing the
 table and column names against the SQL file.
 
-Pre-existing tables — `user_details`, `dhan_access_token`, `strategy_config` —
-are untouched.
+Pre-existing tables — `google_auth_tokens` (was `user_details`), `dhan_access_tokens`
+and `platform_strategy_toggles` (was `strategy_config`) — keep their columns and
+data; only their names changed, in the same migration.
 
 ---
 
@@ -47,32 +56,32 @@ users ──< trading_accounts >── exchanges ──< symbols
   │              │                              │
   │              └──── 1:1 ── account_credentials
   │                                             │
-  └──< subscriptions >── strategy_instances ────┘   (symbol_id = SIGNAL symbol)
+  └──< subscriptions >── shared_strategy_configs ────┘   (symbol_id = SIGNAL symbol)
              │                    │
-       risk_profiles          strategies ──< strategy_param_defs
+       risk_profiles          strategies ──< strategy_param_definitions
                                    │
-                              rule_tree  ──(by name)──> indicator_defs
+                              rule_tree  ──(by name)──> indicators
 ```
 
 **Strategy → indicator.** There is no join table, by design. A strategy declares
-its indicators inside `strategies.rule_tree`, as `{"ind":"EMA","params":{"period":"$fast"}}`
-nodes whose `ind` resolves against `indicator_defs.name` and whose `$key`
-bindings resolve against `strategy_param_defs`. A fixed FK could not express one
+its indicators inside `strategy_templates.rule_tree`, as `{"ind":"EMA","params":{"period":"$fast"}}`
+nodes whose `ind` resolves against `indicators.name` and whose `$key`
+bindings resolve against `strategy_param_definitions`. A fixed FK could not express one
 strategy using the same indicator at two parameterizations, which is exactly what
 EMA Crossover does. `IndicatorResolver` is the only class that knows the tree's
-shape; `StrategyDefinitionValidator` checks the references at save time so a typo
+shape; `StrategyTemplateValidator` checks the references at save time so a typo
 is a 400 rather than a runtime failure in the engine.
 
 **Indicator → parameters.** Stored as the `param_schema` JSON on the indicator
 row, not as a parameter table — the design's changelog records EAV as
 deliberately removed (gap #7). So indicator-parameter CRUD is create/update of
-`paramSchema`; the *values* a user picks live in `strategy_param_defs` (per
-strategy) and in `strategy_instances.signal_params` / `subscriptions.exec_params`
+`paramSchema`; the *values* a user picks live in `strategy_param_definitions` (per
+strategy) and in `shared_strategy_configs.signal_params` / `user_strategy_subscriptions.exec_params`
 (per configuration).
 
-**User → strategy.** Through `subscriptions`. `strategies` and
-`strategy_instances` have no owner column and are shared on purpose — that
-sharing is what dedup is. Ownership is enforced on `subscriptions`,
+**User → strategy.** Through `user_strategy_subscriptions`. `strategy_templates` and
+`shared_strategy_configs` have no owner column and are shared on purpose — that
+sharing is what dedup is. Ownership is enforced on `user_strategy_subscriptions`,
 `trading_accounts` and `user_risk_limits`, and it is part of the query
 (`findByIdAndUser_Id`), so another user's row reports 404, not 403.
 
@@ -83,7 +92,7 @@ sharing is what dedup is. Ownership is enforced on `subscriptions`,
 All require the existing `Authorization: Bearer <access token>`. Errors are
 `{"error": "...", "errors": [...]}`; `errors` is present for validation failures.
 
-### Strategies — `/api/v1/strategies`
+### Strategies — `/api/v1/strategy-templates`
 
 | Method | Path | Status | Notes |
 |---|---|---|---|
@@ -109,7 +118,7 @@ Deactivate with `PUT {"active": false}` instead of deleting when instances exist
 Delete and rename are refused with 409 while a strategy rule tree references the
 indicator by name; so is dropping a `paramSchema` key a live rule tree passes.
 
-### Subscriptions — `/api/v1/subscriptions`
+### Subscriptions — `/api/v1/my-subscriptions`
 
 `GET /`, `GET /{id}`, `POST /` (201), `PUT /{id}`, `DELETE /{id}` (204) — all
 scoped to the caller.
@@ -120,7 +129,78 @@ resulting config (creating it only if nobody already runs that math), bumps
 `version`, records `supersedes_id`, and retires the old instance once its last
 active subscriber leaves. Execution-scope changes stay on the row.
 
-### Strategy instances — `/api/v1/strategy-instances` (read-only)
+### My strategies — `/api/v1/my-strategies`
+
+A user strategy is a customization of a global template. It stores foreign keys
+and **one row per value the user actually changed** — no default, label, data
+type or validation rule is copied down, so an admin retuning a global default
+moves every user who left that knob alone and moves nobody who overrode it.
+
+```
+user_strategies             -> strategy_templates          which global strategy
+  user_strategy_indicators  -> indicators                  which indicator usages
+    user_strategy_parameters -> indicator_parameter_links  changed indicator values
+  user_strategy_parameters  -> parameters                  changed strategy values
+```
+
+`GET /` (`?active=`, `?strategyId=`), `GET /{id}`, `POST /` (201), `PUT /{id}`,
+`DELETE /{id}` (204) — all scoped to the caller. `UNIQUE (user_id, name)`, so one
+user may customize a template many times and two users may both name one
+"My EMA".
+
+**Creating.** The indicator rows are created from the template's own indicators,
+so a body with no `overrides` saves a faithful copy sitting entirely on global
+defaults. Only the knobs listed get a row:
+
+```json
+{ "strategyName": "EMA Crossover",
+  "name": "My fast EMA",
+  "timeframe": "5m",
+  "overrides": [ {"indicatorId": "...", "parameterId": 1, "value": "13"},
+                 {"parameterId": 4, "value": "2.5"} ] }
+```
+
+Overrides address knobs by **id, never by name**. `indicatorId` absent means a
+strategy-level knob (`sl`, `tp`, `quantity`, the durations); `slot` is only
+needed once a template uses one indicator more than once. `PUT` applies them
+entry by entry, and an entry with `"value": null` **deletes** that override so
+the knob returns to the global default — the only way to unset without knowing
+what the default is.
+
+**Effective value** resolves in three levels, at read time:
+
+```
+user_strategy_parameters.custom_value
+  -> indicator_parameter_links.default_value  (or strategy_parameter_links)
+    -> parameters.default_value
+```
+
+**Two reads, one set of rows.** `GET /{id}` is the UI shape: indicators and
+knobs, each carrying `defaultValue`, `customValue`, `effectiveValue` and
+`overridden`, so the whole form renders from one call. `GET /{id}/runtime` is the
+bot shape: the same knobs collapsed to the values in force, coerced by the
+engine's own validator and already split into signal and execution scope. The
+`user_strategy_effective_params` view in `control-plane-schema.sql` answers the
+same question straight from SQL for anything that does not speak HTTP.
+
+**Validation** runs the whole effective set through `StrategyParamValidator`
+against the template's `strategy_param_definitions` — which
+`StrategyParameterLinkSync` derives from the same catalog — so type, range and
+cross-field rules like `d > k` are all enforced, and an override that only makes
+sense next to another value is still caught.
+
+Deleting a template is refused with 409 while any user has customized it.
+
+`POST /{id}/subscribe` (201) puts one to work on a trading account, returning the
+same `StrategySubscriptionResponse` as `/api/v1/my-subscriptions`. The effective
+values are projected into the flat map the execution path already consumes, so
+the config hash and the dedup keep working untouched — two users on the same
+signal values still share one indicator computation. `symbolId` / `timeframe` in
+the body override the saved market and are required when the user strategy has
+none. The row is not consumed: subscribing it to a second account is a second
+subscription.
+
+### Shared strategy configs — `/api/v1/shared-strategy-configs` (read-only)
 
 `GET /` (`?status=active|retired`), `GET /{id}`, and
 `GET /indicator-plan` — the dedup report: active subscriptions vs distinct
@@ -142,13 +222,13 @@ indicator computations. It carries counts and fingerprints only, no identifiers.
 ## 4. Authentication
 
 Unchanged. `JwtFilter`, `SecurityConfig`, `GoogleAuthService`, `JwtUtil` and
-`user_details` were not modified. The new controllers read the principal the
+`google_auth_tokens` were not modified. The new controllers read the principal the
 existing filter already puts in the security context (the email) through
 `SecuredController.currentEmail()`, matching what the existing controllers do
 inline.
 
 `CurrentUserService` maps that email to a `users` row, provisioning it on first
-use, because `trading_accounts`, `subscriptions` and `user_risk_limits` all key
+use, because `trading_accounts`, `user_strategy_subscriptions` and `user_risk_limits` all key
 off `users(id)` — a uuid the auth tables do not carry. `users.password_hash` is
 NOT NULL in the schema and Google-authenticated callers have no local credential,
 so it stores the non-secret sentinel `EXTERNAL_AUTH:GOOGLE`, which the auth flow
@@ -159,9 +239,9 @@ collision.
 
 ## 5. Dedup and the config hash
 
-`strategy_instances.config_hash` is
+`shared_strategy_configs.config_hash` is
 `sha256(strategy_id | symbol_id | timeframe | canonical_jsonb(signal_params))`.
-The `trg_instances_hash` trigger computes it server-side — **the database is the
+The `trg_shared_configs_hash` trigger computes it server-side — **the database is the
 referee** — and `ConfigHashUtil` / `CanonicalJson` reproduce it byte for byte so
 an existing instance can be found before an insert is attempted.
 
@@ -183,6 +263,15 @@ constraints or the partial and GIN indexes. Run the script first on a fresh
 database:
 
 ```
+psql "$DB_URL" -f src/main/resources/db/control-plane-schema.sql
+```
+
+On a database created before the strategy-module rename, run the migration
+FIRST — `ddl-auto=update` does not rename anything, it would create a second,
+empty set of tables beside the populated old ones:
+
+```
+psql "$DB_URL" -f src/main/resources/db/control-plane-rename-migration.sql
 psql "$DB_URL" -f src/main/resources/db/control-plane-schema.sql
 ```
 

@@ -3,10 +3,11 @@ package com.example.tradeLedger.exception;
 import com.example.tradeLedger.controller.IndicatorController;
 import com.example.tradeLedger.controller.ParameterController;
 import com.example.tradeLedger.controller.ReferenceDataController;
-import com.example.tradeLedger.controller.StrategyDefinitionController;
-import com.example.tradeLedger.controller.StrategyInstanceController;
-import com.example.tradeLedger.controller.SubscriptionController;
+import com.example.tradeLedger.controller.StrategyTemplateController;
+import com.example.tradeLedger.controller.SharedStrategyConfigController;
+import com.example.tradeLedger.controller.StrategySubscriptionController;
 import com.example.tradeLedger.controller.TradingAccountController;
+import com.example.tradeLedger.controller.UserStrategyController;
 import com.example.tradeLedger.dto.ApiError;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,13 +29,14 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
  * this work is not meant to touch.
  */
 @RestControllerAdvice(assignableTypes = {
-        StrategyDefinitionController.class,
+        StrategyTemplateController.class,
         IndicatorController.class,
-        StrategyInstanceController.class,
+        SharedStrategyConfigController.class,
         ParameterController.class,
-        SubscriptionController.class,
+        StrategySubscriptionController.class,
         TradingAccountController.class,
-        ReferenceDataController.class
+        ReferenceDataController.class,
+        UserStrategyController.class
 })
 public class StrategyApiExceptionHandler {
 

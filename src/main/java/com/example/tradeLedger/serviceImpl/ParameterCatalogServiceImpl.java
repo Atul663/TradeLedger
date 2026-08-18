@@ -2,16 +2,16 @@ package com.example.tradeLedger.serviceImpl;
 
 import com.example.tradeLedger.dto.ParameterResponse;
 import com.example.tradeLedger.dto.ParameterUsageResponse;
-import com.example.tradeLedger.entity.IndicatorParameter;
+import com.example.tradeLedger.entity.IndicatorParameterLink;
 import com.example.tradeLedger.entity.Parameter;
-import com.example.tradeLedger.entity.StrategyParameter;
+import com.example.tradeLedger.entity.StrategyParameterLink;
 import com.example.tradeLedger.exception.ResourceNotFoundException;
 import com.example.tradeLedger.exception.StrategyValidationException;
-import com.example.tradeLedger.repository.IndicatorDefRepository;
-import com.example.tradeLedger.repository.IndicatorParameterRepository;
+import com.example.tradeLedger.repository.IndicatorRepository;
+import com.example.tradeLedger.repository.IndicatorParameterLinkRepository;
 import com.example.tradeLedger.repository.ParameterRepository;
-import com.example.tradeLedger.repository.StrategyParameterRepository;
-import com.example.tradeLedger.repository.StrategyRepository;
+import com.example.tradeLedger.repository.StrategyParameterLinkRepository;
+import com.example.tradeLedger.repository.StrategyTemplateRepository;
 import com.example.tradeLedger.service.ParameterCatalogService;
 import com.example.tradeLedger.utils.JsonSupport;
 import org.springframework.stereotype.Service;
@@ -28,22 +28,22 @@ public class ParameterCatalogServiceImpl implements ParameterCatalogService {
     private static final Set<String> SCOPES = Set.of(Parameter.SCOPE_SIGNAL, Parameter.SCOPE_EXECUTION);
 
     private final ParameterRepository parameterRepository;
-    private final IndicatorParameterRepository indicatorParameterRepository;
-    private final StrategyParameterRepository strategyParameterRepository;
-    private final IndicatorDefRepository indicatorDefRepository;
-    private final StrategyRepository strategyRepository;
+    private final IndicatorParameterLinkRepository indicatorParameterRepository;
+    private final StrategyParameterLinkRepository strategyParameterRepository;
+    private final IndicatorRepository indicatorRepository;
+    private final StrategyTemplateRepository strategyRepository;
     private final JsonSupport json;
 
     public ParameterCatalogServiceImpl(ParameterRepository parameterRepository,
-                                       IndicatorParameterRepository indicatorParameterRepository,
-                                       StrategyParameterRepository strategyParameterRepository,
-                                       IndicatorDefRepository indicatorDefRepository,
-                                       StrategyRepository strategyRepository,
+                                       IndicatorParameterLinkRepository indicatorParameterRepository,
+                                       StrategyParameterLinkRepository strategyParameterRepository,
+                                       IndicatorRepository indicatorRepository,
+                                       StrategyTemplateRepository strategyRepository,
                                        JsonSupport json) {
         this.parameterRepository = parameterRepository;
         this.indicatorParameterRepository = indicatorParameterRepository;
         this.strategyParameterRepository = strategyParameterRepository;
-        this.indicatorDefRepository = indicatorDefRepository;
+        this.indicatorRepository = indicatorRepository;
         this.strategyRepository = strategyRepository;
         this.json = json;
     }
@@ -79,7 +79,7 @@ public class ParameterCatalogServiceImpl implements ParameterCatalogService {
     @Override
     @Transactional(readOnly = true)
     public List<ParameterResponse> forIndicator(UUID indicatorId) {
-        if (!indicatorDefRepository.existsById(indicatorId)) {
+        if (!indicatorRepository.existsById(indicatorId)) {
             throw ResourceNotFoundException.of("Indicator", indicatorId);
         }
         return indicatorParameterRepository.findByIndicator_IdOrderByDisplayOrderAscIdAsc(indicatorId)
@@ -90,7 +90,7 @@ public class ParameterCatalogServiceImpl implements ParameterCatalogService {
     @Transactional(readOnly = true)
     public List<ParameterResponse> forStrategy(UUID strategyId) {
         if (!strategyRepository.existsById(strategyId)) {
-            throw ResourceNotFoundException.of("Strategy", strategyId);
+            throw ResourceNotFoundException.of("Strategy template", strategyId);
         }
         return strategyParameterRepository.findByStrategy_IdOrderByDisplayOrderAscIdAsc(strategyId)
                 .stream().map(this::toResponse).toList();
@@ -130,12 +130,12 @@ public class ParameterCatalogServiceImpl implements ParameterCatalogService {
                 parameter.getDisplayOrder(), true);
     }
 
-    private ParameterResponse toResponse(IndicatorParameter link) {
+    private ParameterResponse toResponse(IndicatorParameterLink link) {
         return build(link.getParameter(), link.effectiveDefault(),
                 link.effectiveValidation(), link.getDisplayOrder(), link.isRequired());
     }
 
-    private ParameterResponse toResponse(StrategyParameter link) {
+    private ParameterResponse toResponse(StrategyParameterLink link) {
         return build(link.getParameter(), link.effectiveDefault(),
                 link.effectiveValidation(), link.getDisplayOrder(), link.isRequired());
     }

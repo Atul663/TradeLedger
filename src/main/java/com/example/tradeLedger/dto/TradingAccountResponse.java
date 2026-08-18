@@ -13,7 +13,7 @@ public record TradingAccountResponse(
         boolean active,
         String vaultRef,
         OffsetDateTime rotatedAt,
-        long activeSubscriptions,
+        long activeStrategySubscriptions,
         OffsetDateTime createdAt,
         OffsetDateTime updatedAt) {
 }

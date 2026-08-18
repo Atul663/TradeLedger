@@ -1,9 +1,9 @@
 package com.example.tradeLedger.serviceImpl;
 
-import com.example.tradeLedger.entity.UserDetails;
-import com.example.tradeLedger.repository.UserDetailsRepository;
+import com.example.tradeLedger.entity.GoogleAuthToken;
+import com.example.tradeLedger.repository.GoogleAuthTokenRepository;
 import com.example.tradeLedger.service.GoogleAuthService;
-import com.example.tradeLedger.service.UserDetailsService;
+import com.example.tradeLedger.service.GoogleAuthTokenService;
 import com.example.tradeLedger.utils.JwtUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.api.client.googleapis.auth.oauth2.GoogleAuthorizationCodeTokenRequest;
@@ -25,8 +25,8 @@ import java.util.Map;
 @Service
 public class GoogleAuthServiceImpl implements GoogleAuthService {
 
-    private final UserDetailsService userDetailsService;
-    private final UserDetailsRepository userDetailsRepository;
+    private final GoogleAuthTokenService googleAuthTokenService;
+    private final GoogleAuthTokenRepository googleAuthTokenRepository;
 
     @Value("${google.client.id}")
     private String clientId;
@@ -38,10 +38,10 @@ public class GoogleAuthServiceImpl implements GoogleAuthService {
     private static final String DEFAULT_FRONTEND_BASE_URL =
             "https://trade-pnl-analysis.vercel.app";
 
-    public GoogleAuthServiceImpl(UserDetailsService userDetailsService,
-                                 UserDetailsRepository userDetailsRepository) {
-        this.userDetailsService = userDetailsService;
-        this.userDetailsRepository = userDetailsRepository;
+    public GoogleAuthServiceImpl(GoogleAuthTokenService googleAuthTokenService,
+                                 GoogleAuthTokenRepository googleAuthTokenRepository) {
+        this.googleAuthTokenService = googleAuthTokenService;
+        this.googleAuthTokenRepository = googleAuthTokenRepository;
     }
 
     @Override
@@ -83,7 +83,7 @@ public class GoogleAuthServiceImpl implements GoogleAuthService {
         String googleRefreshToken = tokenResponse.getRefreshToken();
         String email = getUserEmail(googleAccessToken);
 
-        userDetailsService.saveOrUpdateToken(email, googleAccessToken, googleRefreshToken);
+        googleAuthTokenService.saveOrUpdateToken(email, googleAccessToken, googleRefreshToken);
 
         String jwtRefreshToken = JwtUtil.generateRefreshToken(email);
         Cookie cookie = buildRefreshCookie(jwtRefreshToken, 7 * 24 * 60 * 60);
@@ -102,7 +102,7 @@ public class GoogleAuthServiceImpl implements GoogleAuthService {
 
         try {
             String email = JwtUtil.extractEmail(refreshToken);
-            UserDetails userDetails = userDetailsRepository.findByEmail(email)
+            GoogleAuthToken userDetails = googleAuthTokenRepository.findByEmail(email)
                     .orElseThrow(() -> new RuntimeException("User not found"));
 
             if (userDetails.isRevoked()) {
@@ -130,7 +130,7 @@ public class GoogleAuthServiceImpl implements GoogleAuthService {
 
         try {
             String email = JwtUtil.extractEmail(refreshToken);
-            UserDetails userDetails = userDetailsRepository.findByEmail(email)
+            GoogleAuthToken userDetails = googleAuthTokenRepository.findByEmail(email)
                     .orElseThrow(() -> new RuntimeException("User not found"));
 
             if (userDetails.isRevoked()) {
@@ -152,10 +152,10 @@ public class GoogleAuthServiceImpl implements GoogleAuthService {
         if (refreshToken != null) {
             try {
                 String email = JwtUtil.extractEmail(refreshToken);
-                UserDetails userDetails = userDetailsRepository.findByEmail(email)
+                GoogleAuthToken userDetails = googleAuthTokenRepository.findByEmail(email)
                         .orElseThrow(() -> new RuntimeException("User not found"));
                 userDetails.setRevoked(true);
-                userDetailsRepository.save(userDetails);
+                googleAuthTokenRepository.save(userDetails);
             } catch (Exception ignored) {
             }
         }
@@ -261,7 +261,7 @@ public class GoogleAuthServiceImpl implements GoogleAuthService {
         return url;
     }
 
-    private boolean hasPanCard(UserDetails userDetails) {
+    private boolean hasPanCard(GoogleAuthToken userDetails) {
         return userDetails.getPanCard() != null && !userDetails.getPanCard().isBlank();
     }
 }

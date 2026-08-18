@@ -9,7 +9,7 @@ import java.util.UUID;
 /**
  * Table {@code risk_profiles}: reusable per-subscription limit sets.
  *
- * Optional on a {@link Subscription} ({@code risk_profile_id} is nullable);
+ * Optional on a {@link StrategySubscription} ({@code risk_profile_id} is nullable);
  * user-level aggregate caps live separately in {@link UserRiskLimit}.
  */
 @Entity

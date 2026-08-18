@@ -9,7 +9,7 @@ import java.util.UUID;
 /**
  * Read access to the parameter catalog and the two link tables that hang off it.
  *
- * Between this and {@code GET /api/v1/strategies/{id}}, every direction of the
+ * Between this and {@code GET /api/v1/strategy-templates/{id}}, every direction of the
  * hierarchy is reachable by id: down from a strategy, down from an indicator, and
  * back up from a parameter to everything using it.
  */

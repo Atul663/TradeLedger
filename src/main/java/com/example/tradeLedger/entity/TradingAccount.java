@@ -9,7 +9,7 @@ import java.util.UUID;
  * Table {@code trading_accounts}: one user, many accounts across exchanges.
  *
  * Required by the strategy module because {@code subscriptions.trading_account_id}
- * is NOT NULL - and because UNIQUE(strategy_instance_id, trading_account_id) is
+ * is NOT NULL - and because UNIQUE(shared_config_id, trading_account_id) is
  * what makes "one config on two accounts" two independently tracked legs.
  */
 @Entity

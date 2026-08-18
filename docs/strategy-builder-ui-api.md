@@ -33,11 +33,11 @@ Between A and B sits a shared object the UI should **display but never create**:
 
 ```
 Strategy (template)         →  "EMA Crossover", rule tree, knob definitions
-   └─ StrategyInstance      →  EMA Crossover + NIFTY + 5m + {fast:9, slow:21}
-        └─ Subscription     →  ...on MY account, with MY stop loss, paper mode
+   └─ SharedStrategyConfig      →  EMA Crossover + NIFTY + 5m + {fast:9, slow:21}
+        └─ StrategySubscription     →  ...on MY account, with MY stop loss, paper mode
 ```
 
-A `StrategyInstance` is **immutable and shared**. Two users who pick identical
+A `SharedStrategyConfig` is **immutable and shared**. Two users who pick identical
 signal parameters land on the *same* instance row and the same `configHash` —
 that is deliberate, it is how the platform computes EMA(9) once instead of twice.
 Instances appear automatically when someone subscribes. There is no create
@@ -162,7 +162,7 @@ Offer a select rather than a free-text field:
 ### 4.1 Browse strategies
 
 ```
-GET /api/v1/strategies?active=true
+GET /api/v1/strategy-templates?active=true
 ```
 
 One call returns everything needed to render cards *and* the configuration form —
@@ -179,11 +179,11 @@ Badges to render per item:
 ### 4.2 Subscribe (the main builder flow)
 
 ```
-1. GET /api/v1/strategies/{id}          → knob definitions + rule tree
+1. GET /api/v1/strategy-templates/{id}          → knob definitions + rule tree
 2. GET /api/v1/symbols?activeOnly=true  → signal symbol picker
 3. GET /api/v1/trading-accounts         → the user's accounts (required)
 4. GET /api/v1/risk-profiles            → optional
-5. POST /api/v1/subscriptions           → 201
+5. POST /api/v1/my-subscriptions           → 201
 ```
 
 Steps 2–4 can run in parallel with 1.
@@ -201,14 +201,14 @@ EMA(period=9), EMA(period=21)" is the feature that makes dedup legible to users.
 ### 4.3 Edit a subscription
 
 ```
-PUT /api/v1/subscriptions/{id}
+PUT /api/v1/my-subscriptions/{id}
 { "params": { "fast": 13 } }
 ```
 
 `params` is **merged** over the current effective configuration, so send only what
 changed. Everything else in the body is a partial update too.
 
-Watch for these in the response: `configHash` and `strategyInstanceId` change and
+Watch for these in the response: `configHash` and `sharedConfigId` change and
 `version` increments when a *signal* parameter changed; they stay put when only
 *execution* parameters changed. Nothing changes for the user either way — don't
 show a scary "your strategy was recreated" message.
@@ -216,7 +216,7 @@ show a scary "your strategy was recreated" message.
 Pause / resume without losing configuration:
 
 ```
-PUT /api/v1/subscriptions/{id}   { "active": false }
+PUT /api/v1/my-subscriptions/{id}   { "active": false }
 ```
 
 ### 4.4 Author a new strategy
@@ -224,7 +224,7 @@ PUT /api/v1/subscriptions/{id}   { "active": false }
 ```
 1. GET /api/v1/indicators?active=true   → available primitives + paramSchema
 2. build the rule tree in the canvas     (grammar in §7)
-3. POST /api/v1/strategies               → 201, is always system:false
+3. POST /api/v1/strategy-templates               → 201, is always system:false
 ```
 
 Send `ruleTree` and `params[]` together on create — the server cross-validates
@@ -243,16 +243,16 @@ the canvas:
 
 ## 5. Endpoint reference
 
-### 5.1 Strategies — `/api/v1/strategies`
+### 5.1 Strategies — `/api/v1/strategy-templates`
 
-#### `GET /api/v1/strategies`
+#### `GET /api/v1/strategy-templates`
 
 Query: `active` (boolean, optional), `search` (string, optional — case-insensitive
 name fragment). Returns `StrategyDetail[]`.
 
-#### `GET /api/v1/strategies/{id}` → `StrategyDetail` · 404
+#### `GET /api/v1/strategy-templates/{id}` → `StrategyDetail` · 404
 
-#### `GET /api/v1/strategies/by-name/{name}` → `StrategyDetail` · 404
+#### `GET /api/v1/strategy-templates/by-name/{name}` → `StrategyDetail` · 404
 
 Names contain spaces — URL-encode: `/by-name/EMA%20Crossover`.
 
@@ -304,7 +304,7 @@ Names contain spaces — URL-encode: `/by-name/EMA%20Crossover`.
 | `params[].validation` | always an object; `{}` when no rules |
 | `instanceCount` | > 0 means delete is blocked |
 
-#### `POST /api/v1/strategies` → **201** · 400 · 409
+#### `POST /api/v1/strategy-templates` → **201** · 400 · 409
 
 ```json
 {
@@ -336,7 +336,7 @@ Optional: `description`, `version` (default 1, ≥1), `active` (default `true`),
 
 `409` when the name is taken.
 
-#### `PUT /api/v1/strategies/{id}` → 200 · 400 · 404 · 409
+#### `PUT /api/v1/strategy-templates/{id}` → 200 · 400 · 404 · 409
 
 **Partial**: omitted fields are left unchanged — except `params`, which
 **replaces the entire knob set** when present. Omit `params` to leave knobs alone;
@@ -345,24 +345,24 @@ send `[]` to delete them all.
 Renaming to a taken name → 409. Editing a `system: true` strategy → 409.
 Deactivate with `{ "active": false }`.
 
-#### `DELETE /api/v1/strategies/{id}` → **204** · 404 · 409
+#### `DELETE /api/v1/strategy-templates/{id}` → **204** · 404 · 409
 
 Hard delete, cascading to the knob definitions. `409` when `instanceCount > 0`
 (the message names the count and suggests deactivating) or when `system: true`.
 
 ---
 
-### 5.2 Strategy parameters — `/api/v1/strategies/{id}/params`
+### 5.2 Strategy parameters — `/api/v1/strategy-templates/{id}/params`
 
 Indicator parameters, at the level users actually set them. Use these for
 incremental editing; use `PUT /strategies/{id}` with `params[]` for bulk replace.
 
 | Method | Path | Status |
 |---|---|---|
-| GET | `/api/v1/strategies/{id}/params` | 200 → `StrategyParamDef[]` |
-| POST | `/api/v1/strategies/{id}/params` | **201** · 400 · 404 · 409 |
-| PUT | `/api/v1/strategies/{id}/params/{paramId}` | 200 · 400 · 404 · 409 |
-| DELETE | `/api/v1/strategies/{id}/params/{paramId}` | **204** · 404 · 409 |
+| GET | `/api/v1/strategy-templates/{id}/params` | 200 → `StrategyParamDefinition[]` |
+| POST | `/api/v1/strategy-templates/{id}/params` | **201** · 400 · 404 · 409 |
+| PUT | `/api/v1/strategy-templates/{id}/params/{paramId}` | 200 · 400 · 404 · 409 |
+| DELETE | `/api/v1/strategy-templates/{id}/params/{paramId}` | **204** · 404 · 409 |
 
 Request body (POST and PUT):
 
@@ -388,14 +388,14 @@ DELETE of a parameter the rule tree still binds (`$fast`) — edit the tree firs
 
 | Method | Path | Status |
 |---|---|---|
-| GET | `/api/v1/indicators?active=true` | 200 → `IndicatorDef[]` |
+| GET | `/api/v1/indicators?active=true` | 200 → `Indicator[]` |
 | GET | `/api/v1/indicators/{id}` | 200 · 404 |
 | GET | `/api/v1/indicators/by-name/{name}` | 200 · 404 (name is case-insensitive) |
 | POST | `/api/v1/indicators` | **201** · 400 · 409 |
 | PUT | `/api/v1/indicators/{id}` | 200 · 400 · 404 · 409 |
 | DELETE | `/api/v1/indicators/{id}` | **204** · 404 · 409 |
 
-**`IndicatorDef`**
+**`Indicator`**
 
 ```json
 {
@@ -443,17 +443,17 @@ passes. Deactivating (`active: false`) is always allowed and is the escape hatch
 
 ---
 
-### 5.4 Subscriptions — `/api/v1/subscriptions`
+### 5.4 StrategySubscriptions — `/api/v1/my-subscriptions`
 
 All calls are scoped to the authenticated user.
 
 | Method | Path | Status |
 |---|---|---|
-| GET | `/api/v1/subscriptions` | 200 → `Subscription[]` |
-| GET | `/api/v1/subscriptions/{id}` | 200 · 404 |
-| POST | `/api/v1/subscriptions` | **201** · 400 · 404 · 409 |
-| PUT | `/api/v1/subscriptions/{id}` | 200 · 400 · 404 · 409 |
-| DELETE | `/api/v1/subscriptions/{id}` | **204** · 404 |
+| GET | `/api/v1/my-subscriptions` | 200 → `StrategySubscription[]` |
+| GET | `/api/v1/my-subscriptions/{id}` | 200 · 404 |
+| POST | `/api/v1/my-subscriptions` | **201** · 400 · 404 · 409 |
+| PUT | `/api/v1/my-subscriptions/{id}` | 200 · 400 · 404 · 409 |
+| DELETE | `/api/v1/my-subscriptions/{id}` | **204** · 404 |
 
 #### Create
 
@@ -512,7 +512,7 @@ re-create.
 **409:** the repointed configuration would collide with another subscription the
 user already has on the same account.
 
-#### `Subscription`
+#### `StrategySubscription`
 
 ```json
 {
@@ -520,7 +520,7 @@ user already has on the same account.
   "userId": "11111111-2222-3333-4444-555555555555",
   "strategyId": "00000000-0000-0000-0000-00000000e0a1",
   "strategyName": "EMA Crossover",
-  "strategyInstanceId": "6ae0...",
+  "sharedConfigId": "6ae0...",
   "configHash": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
   "symbolId": "7c2e...",
   "symbol": "NIFTY",
@@ -552,13 +552,13 @@ merge them: `{ ...signalParams, ...execParams }`.
 
 ---
 
-### 5.5 Strategy instances — `/api/v1/strategy-instances` (read-only)
+### 5.5 Strategy instances — `/api/v1/shared-strategy-configs` (read-only)
 
 | Method | Path | Status |
 |---|---|---|
-| GET | `/api/v1/strategy-instances?status=active` | 200 → `StrategyInstance[]` |
-| GET | `/api/v1/strategy-instances/{id}` | 200 · 404 |
-| GET | `/api/v1/strategy-instances/indicator-plan` | 200 |
+| GET | `/api/v1/shared-strategy-configs?status=active` | 200 → `SharedStrategyConfig[]` |
+| GET | `/api/v1/shared-strategy-configs/{id}` | 200 · 404 |
+| GET | `/api/v1/shared-strategy-configs/indicator-plan` | 200 |
 
 ```json
 {
@@ -578,7 +578,7 @@ These rows carry no user identity, so they are safe to show platform-wide.
 **Indicator plan** — an optional admin/insight widget:
 
 ```json
-{ "activeSubscriptions": 3, "distinctInstances": 3,
+{ "activeStrategySubscriptions": 3, "distinctInstances": 3,
   "distinctIndicators": 4,
   "indicators": ["EMA(period=13)", "EMA(period=21)", "EMA(period=50)", "EMA(period=9)"] }
 ```
@@ -618,11 +618,11 @@ user per exchange. PUT is partial; the exchange cannot be changed.
   "exchangeName": "National Stock Exchange of India",
   "accountName": "Primary", "active": true,
   "vaultRef": "secret/brokers/dhan/acct-123", "rotatedAt": null,
-  "activeSubscriptions": 2,
+  "activeStrategySubscriptions": 2,
   "createdAt": "...", "updatedAt": "..." }
 ```
 
-**409 on delete** while `activeSubscriptions > 0` — offer "deactivate" instead.
+**409 on delete** while `activeStrategySubscriptions > 0` — offer "deactivate" instead.
 
 ---
 
@@ -745,7 +745,7 @@ API:
 { "ind": "EMA", "params": { "period": "$fast" } }
 ```
 
-- `ind` — must match an `indicator_defs.name`, active, case-sensitive (uppercase).
+- `ind` — must match an `indicators.name`, active, case-sensitive (uppercase).
 - `params` keys — must exist in that indicator's `paramSchema`.
 - values — either a `"$binding"` referencing a strategy `parameterKey`, or a literal.
 
@@ -769,7 +769,7 @@ What the server rejects at save time:
 |---|---|
 | `ruleTree is required and must be a non-empty JSON object` | empty tree |
 | `ruleTree references no indicators - expected at least one {"ind":"..."} node` | no indicator node |
-| `ruleTree references unknown indicator 'X'` | no such `indicator_defs.name` |
+| `ruleTree references unknown indicator 'X'` | no such `indicators.name` |
 | `ruleTree references inactive indicator 'X'` | exists but `active: false` |
 | `Indicator 'EMA' has no parameter 'length' - its schema declares [period]` | key not in `paramSchema` |
 | `ruleTree binds $fast but the strategy defines no parameter 'fast'` | missing knob |
@@ -787,7 +787,7 @@ no strategy-to-indicator join table to query.
    certainty; "not found or not available" is the honest message.
 3. **Strategy parameter ids are integers**; every other id is a UUID string.
 4. **`defaultValue` is a string** even for numeric types.
-5. **Subscription `PUT` merges `params`, replaces everything else.**
+5. **StrategySubscription `PUT` merges `params`, replaces everything else.**
 6. **Risk-limits `PUT` clears omitted fields.** Send all three.
 7. **`configHash` changing is normal** after a signal-parameter edit. The
    subscription `id` is stable — key your list on it, not on the hash or instance id.
@@ -806,7 +806,7 @@ no strategy-to-indicator join table to query.
 ```ts
 export interface ApiError { error: string; errors?: string[] }
 
-export interface StrategyParamDef {
+export interface StrategyParamDefinition {
   id: number;
   parameterKey: string;
   dataType: DataType;
@@ -823,21 +823,21 @@ export interface StrategyDetail {
   system: boolean; active: boolean;
   ruleTree: Record<string, unknown>;
   indicators: string[]; unknownIndicators: string[];
-  params: StrategyParamDef[];
+  params: StrategyParamDefinition[];
   instanceCount: number;
   createdAt: string; updatedAt: string;
 }
 
-export interface IndicatorDef {
+export interface Indicator {
   id: string; name: string;
   paramSchema: Record<string, { type: DataType; min?: number; max?: number; options?: unknown[] }>;
   active: boolean; usedByStrategies: string[]; createdAt: string;
 }
 
-export interface Subscription {
+export interface StrategySubscription {
   id: string; userId: string;
   strategyId: string; strategyName: string;
-  strategyInstanceId: string; configHash: string;
+  sharedConfigId: string; configHash: string;
   symbolId: string; symbol: string; timeframe: string;
   signalParams: Record<string, unknown>;
   execParams: Record<string, unknown>;
@@ -851,7 +851,7 @@ export interface Subscription {
   createdAt: string; updatedAt: string;
 }
 
-export interface StrategyInstance {
+export interface SharedStrategyConfig {
   id: string; strategyId: string; strategyName: string;
   symbolId: string; symbol: string; timeframe: string;
   signalParams: Record<string, unknown>;
@@ -864,7 +864,7 @@ export interface TradingAccount {
   id: string; exchangeId: string; exchangeCode: string; exchangeName: string;
   accountName: string; active: boolean;
   vaultRef: string | null; rotatedAt: string | null;
-  activeSubscriptions: number; createdAt: string; updatedAt: string;
+  activeStrategySubscriptions: number; createdAt: string; updatedAt: string;
 }
 
 export interface Exchange {
@@ -901,30 +901,30 @@ export interface UserRiskLimits {
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/v1/strategies` | list (`?active`, `?search`) |
-| GET | `/api/v1/strategies/{id}` | detail |
-| GET | `/api/v1/strategies/by-name/{name}` | detail by unique name |
-| POST | `/api/v1/strategies` | create |
-| PUT | `/api/v1/strategies/{id}` | update / deactivate |
-| DELETE | `/api/v1/strategies/{id}` | delete |
-| GET | `/api/v1/strategies/{id}/params` | list knobs |
-| POST | `/api/v1/strategies/{id}/params` | add knob |
-| PUT | `/api/v1/strategies/{id}/params/{paramId}` | update knob |
-| DELETE | `/api/v1/strategies/{id}/params/{paramId}` | delete knob |
+| GET | `/api/v1/strategy-templates` | list (`?active`, `?search`) |
+| GET | `/api/v1/strategy-templates/{id}` | detail |
+| GET | `/api/v1/strategy-templates/by-name/{name}` | detail by unique name |
+| POST | `/api/v1/strategy-templates` | create |
+| PUT | `/api/v1/strategy-templates/{id}` | update / deactivate |
+| DELETE | `/api/v1/strategy-templates/{id}` | delete |
+| GET | `/api/v1/strategy-templates/{id}/params` | list knobs |
+| POST | `/api/v1/strategy-templates/{id}/params` | add knob |
+| PUT | `/api/v1/strategy-templates/{id}/params/{paramId}` | update knob |
+| DELETE | `/api/v1/strategy-templates/{id}/params/{paramId}` | delete knob |
 | GET | `/api/v1/indicators` | list (`?active`) |
 | GET | `/api/v1/indicators/{id}` | detail |
 | GET | `/api/v1/indicators/by-name/{name}` | detail by name |
 | POST | `/api/v1/indicators` | create |
 | PUT | `/api/v1/indicators/{id}` | update schema / deactivate |
 | DELETE | `/api/v1/indicators/{id}` | delete |
-| GET | `/api/v1/subscriptions` | the caller's configurations |
-| GET | `/api/v1/subscriptions/{id}` | detail |
-| POST | `/api/v1/subscriptions` | subscribe |
-| PUT | `/api/v1/subscriptions/{id}` | edit / pause / resume |
-| DELETE | `/api/v1/subscriptions/{id}` | unsubscribe |
-| GET | `/api/v1/strategy-instances` | shared configs (`?status`) |
-| GET | `/api/v1/strategy-instances/{id}` | detail |
-| GET | `/api/v1/strategy-instances/indicator-plan` | dedup report |
+| GET | `/api/v1/my-subscriptions` | the caller's configurations |
+| GET | `/api/v1/my-subscriptions/{id}` | detail |
+| POST | `/api/v1/my-subscriptions` | subscribe |
+| PUT | `/api/v1/my-subscriptions/{id}` | edit / pause / resume |
+| DELETE | `/api/v1/my-subscriptions/{id}` | unsubscribe |
+| GET | `/api/v1/shared-strategy-configs` | shared configs (`?status`) |
+| GET | `/api/v1/shared-strategy-configs/{id}` | detail |
+| GET | `/api/v1/shared-strategy-configs/indicator-plan` | dedup report |
 | GET | `/api/v1/trading-accounts` | the caller's accounts |
 | GET | `/api/v1/trading-accounts/{id}` | detail |
 | POST | `/api/v1/trading-accounts` | create |

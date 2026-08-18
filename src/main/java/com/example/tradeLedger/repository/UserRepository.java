@@ -7,7 +7,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Control-plane {@code users}. Separate from {@link UserDetailsRepository}, which
+ * Control-plane {@code users}. Separate from {@link GoogleAuthTokenRepository}, which
  * backs the existing authentication flow and is not touched by this module.
  */
 public interface UserRepository extends JpaRepository<User, UUID> {

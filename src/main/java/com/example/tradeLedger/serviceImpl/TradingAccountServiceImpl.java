@@ -11,7 +11,7 @@ import com.example.tradeLedger.exception.ResourceNotFoundException;
 import com.example.tradeLedger.exception.StrategyValidationException;
 import com.example.tradeLedger.repository.AccountCredentialRepository;
 import com.example.tradeLedger.repository.ExchangeRepository;
-import com.example.tradeLedger.repository.SubscriptionRepository;
+import com.example.tradeLedger.repository.StrategySubscriptionRepository;
 import com.example.tradeLedger.repository.TradingAccountRepository;
 import com.example.tradeLedger.service.CurrentUserService;
 import com.example.tradeLedger.service.TradingAccountService;
@@ -36,13 +36,13 @@ public class TradingAccountServiceImpl implements TradingAccountService {
     private final TradingAccountRepository tradingAccountRepository;
     private final AccountCredentialRepository credentialRepository;
     private final ExchangeRepository exchangeRepository;
-    private final SubscriptionRepository subscriptionRepository;
+    private final StrategySubscriptionRepository subscriptionRepository;
 
     public TradingAccountServiceImpl(CurrentUserService currentUserService,
                                      TradingAccountRepository tradingAccountRepository,
                                      AccountCredentialRepository credentialRepository,
                                      ExchangeRepository exchangeRepository,
-                                     SubscriptionRepository subscriptionRepository) {
+                                     StrategySubscriptionRepository subscriptionRepository) {
         this.currentUserService = currentUserService;
         this.tradingAccountRepository = tradingAccountRepository;
         this.credentialRepository = credentialRepository;

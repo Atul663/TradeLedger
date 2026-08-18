@@ -8,7 +8,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.UUID;
 
 /**
- * Content addressing for {@code strategy_instances}.
+ * Content addressing for {@code shared_strategy_configs}.
  *
  * Reproduces the schema's {@code compute_config_hash()} exactly:
  * <pre>

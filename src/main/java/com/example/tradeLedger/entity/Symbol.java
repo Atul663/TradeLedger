@@ -10,7 +10,7 @@ import java.util.UUID;
  * Table {@code symbols}: options-aware contract master.
  *
  * Convention from the design doc: indicators run on the UNDERLYING (spot/index),
- * so {@link StrategyInstance#getSymbol()} is the SIGNAL symbol. Orders target the
+ * so {@link SharedStrategyConfig#getSymbol()} is the SIGNAL symbol. Orders target the
  * traded contract, which is an execution-plane concern and out of scope here.
  */
 @Entity
