@@ -218,7 +218,8 @@ indicator computations. It carries counts and fingerprints only, no identifiers.
 ### Broker setups — `/api/v1/my-brokers`
 
 `GET /`, `GET /{id}`, `POST /` (201), `PUT /{id}`, `DELETE /{id}` (204),
-plus `GET|PUT|DELETE /{id}/credentials`. Step one: the setup holds the login
+plus `GET|PUT|DELETE /{id}/credentials`, and `POST /setup` - the whole wizard
+(setup + first account + key) in one transaction. Step one: the setup holds the login
 and the API key every account under it inherits. 409 on delete while accounts
 still hang off it, and a setup cannot change broker.
 

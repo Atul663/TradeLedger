@@ -729,11 +729,13 @@ All strategy-module endpoints require `Authorization: Bearer <accessToken>`.
 | GET/PUT/DELETE | `/api/v1/my-subscriptions/{id}` | Another user's row reports **404, not 403** |
 | GET/POST | `/api/v1/trading-accounts` | |
 | GET/POST | `/api/v1/my-brokers` | The caller's broker setups — step one |
+| POST | `/api/v1/my-brokers/setup` | Wizard: setup + first account + key in one transaction |
 | GET/PUT/DELETE | `/api/v1/my-brokers/{id}` | 409 on delete while accounts hang off it |
 | GET/PUT/DELETE | `/api/v1/my-brokers/{id}/credentials` | The key every account under it inherits |
 | GET/PUT/DELETE | `/api/v1/trading-accounts/{id}` | An account cannot move between setups |
 | GET/PUT/DELETE | `/api/v1/trading-accounts/{id}/credentials` | One account's override; masked on read, PUT is partial, `""` clears a field |
-| GET | `/api/v1/exchanges`, `/brokers`, `/symbols`, `/risk-profiles` | Reference data |
+| GET | `/api/v1/exchanges`, `/symbols`, `/risk-profiles` | Reference data, read-only |
+| GET/POST/PUT/DELETE | `/api/v1/brokers` | The broker catalog. **Shared master data** — writes are not role-gated yet |
 | GET/PUT | `/api/v1/me/risk-limits` | Aggregate caps |
 
 Ownership is enforced *inside the query* (`findByIdAndUser_Id`), which is why a

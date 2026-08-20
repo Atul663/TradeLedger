@@ -189,9 +189,10 @@ Badges to render per item:
 Steps 2–4 can run in parallel with 1.
 
 **A subscription requires a trading account.** If `GET /trading-accounts` returns
-`[]`, route the user to **broker setup first** — `POST /api/v1/my-brokers`, then
-its credentials, then the account. Do not let them fill the whole subscription
-form and fail at submit.
+`[]`, route the user to **broker setup first**. One call does the whole wizard:
+`POST /api/v1/my-brokers/setup` creates the setup, its first account and its API
+key in a single transaction. Do not let them fill the subscription form and fail
+at submit.
 
 Render the form from `params[]` (see §6). Submit *all* knob values flat in
 `params`, both scopes together; the server splits them by `scope`.
@@ -589,7 +590,57 @@ Three users on 9×21, 9×50 and 13×21 cost four EMA computations, not six. Good
 
 ---
 
-### 5.6 Broker setups — `/api/v1/my-brokers`
+### 5.6 Broker catalog — `/api/v1/brokers`
+
+What fills the broker dropdown. Shared across all users; a user then creates
+their own setup against one of these (5.7).
+
+| Method | Path | Status |
+|---|---|---|
+| GET | `/api/v1/brokers` (`?activeOnly`, default true) | 200 → `Broker[]` |
+| GET | `/api/v1/brokers/{id}` | 200 · 404 |
+| GET | `/api/v1/brokers/by-code/{code}` | 200 · 404 |
+| POST | `/api/v1/brokers` | **201** · 400 · 409 |
+| POST | `/api/v1/brokers/bulk` | **201** · 400 · 409 |
+| PUT | `/api/v1/brokers/{id}` | 200 · 400 · 404 · 409 |
+| DELETE | `/api/v1/brokers/{id}` | **204** · 404 · 409 |
+
+```json
+{ "code": "DELTA",
+  "name": "Delta Exchange",
+  "description": "Delta India: broker and venue in one",
+  "apiBaseUrl": "https://api.india.delta.exchange",
+  "authType": "api_key" }
+```
+
+`code` is uppercased and must be `[A-Z0-9_]+` — it is a handle the adapters
+switch on, not a display label; `name` is the label. `authType` defaults to
+`api_key` and decides which credential fields the UI asks for later (see 5.9), so
+it is worth getting right at creation.
+
+`POST /bulk` takes an array of the same body and is all-or-nothing. It rejects
+duplicate codes **within the batch** before writing anything, so a clash cannot
+leave the earlier rows committed and the caller guessing which landed.
+
+> **This is shared master data.** These rows are not scoped to the caller —
+> editing one changes what every user sees, and every `user_brokers` row points
+> at one. Two rules follow:
+>
+> - **`code` cannot change** (409). Adapters and every existing setup are keyed
+>   on it; renaming would silently repoint them all. Deactivate and create the
+>   new one instead.
+> - **DELETE is refused** (409) while any user's setup points at the row.
+>   Deactivating is the way to retire a broker: it stops new setups without
+>   breaking the ones that exist.
+
+> **Not role-gated yet.** Any authenticated caller can write here. The platform's
+> other shared catalogs (`exchanges`, `symbols`, `risk-profiles`) are read-only
+> for that reason. Put an admin check in front of the write methods before this
+> API is open to end users.
+
+---
+
+### 5.7 Broker setups — `/api/v1/my-brokers`
 
 **Set the broker up first, then create accounts in it.** One setup holds one
 login and its API key; the accounts underneath it share that key.
@@ -631,11 +682,50 @@ the broker that issued them; a different broker is a different setup.
 
 **409 on delete** while `tradingAccountCount > 0` — offer "deactivate" instead.
 
-Credentials live at `.../my-brokers/{id}/credentials` — see 5.8.
+Credentials live at `.../my-brokers/{id}/credentials` — see 5.9.
+
+#### One-call setup — `POST /api/v1/my-brokers/setup`
+
+For the "add a broker" wizard. Creates the setup, its first account and its API
+key **in one transaction**, so a rejected key takes the setup and account back
+out with it. `201` · `400` · `404` · `409`.
+
+```json
+{ "brokerCode": "DELTA",
+  "label": "My Delta",
+  "account": { "accountName": "main", "brokerAccountId": "42891" },
+  "credentials": { "apiKey": "abc123", "apiSecret": "s3cr3t" } }
+```
+
+```json
+{ "broker":      { "id": "77aa...", "brokerCode": "DELTA", "label": "My Delta",
+                   "credentialsConfigured": true, "tradingAccountCount": 1, "...": "..." },
+  "account":     { "id": "a41b...", "accountName": "main",
+                   "credentialsConfigured": true, "credentialsOverridden": false, "...": "..." },
+  "credentials": { "apiKeyHint": "****c123", "hasApiSecret": true, "...": "..." } }
+```
+
+Everything the next screen needs, with no follow-up `GET`. `account` is null when
+none was requested and `credentials` is null when no key was sent, so "not asked
+for" is distinguishable from "failed".
+
+**Credentials go on the setup by default.** That is right when the key belongs to
+the login rather than to one account — every account added later inherits it and
+needs no key at all. Send `"credentialsScope": "ACCOUNT"` only for brokers that
+really do issue a separate key per sub-account; it needs an `account` in the same
+body, and writes an override instead.
+
+`account` and `credentials` are both optional — omit either to build the rest now
+and finish through the individual endpoints later.
+
+This composes the three endpoints rather than replacing them; every validation
+and conflict rule is the same one, and changing any of the three afterwards still
+goes through its own endpoint.
+
 
 ---
 
-### 5.7 Trading accounts — `/api/v1/trading-accounts`
+### 5.8 Trading accounts — `/api/v1/trading-accounts`
 
 The accounts under a setup. This is what a subscription points at.
 
@@ -681,7 +771,7 @@ cannot change broker.
 
 ---
 
-### 5.8 Broker credentials — two levels
+### 5.9 Broker credentials — two levels
 
 The same body and the same response shape at both levels:
 
@@ -747,7 +837,7 @@ reports what is set, and every write fails with a clear message.
 
 ---
 
-### 5.9 Reference data — read-only
+### 5.10 Reference data — read-only
 
 | Method | Path | Notes |
 |---|---|---|
@@ -786,7 +876,7 @@ role model to gate writes with. Don't build create/edit screens.
 convention the underlying (`instrumentType` of `index` or `spot`), not an option
 contract. Default the picker to those and de-emphasize `option` rows.
 
-### 5.10 The caller's risk limits — `/api/v1/me/risk-limits`
+### 5.11 The caller's risk limits — `/api/v1/me/risk-limits`
 
 ```
 GET  /api/v1/me/risk-limits   → 200
@@ -1089,6 +1179,7 @@ export interface UserRiskLimits {
 | GET | `/api/v1/my-brokers` | the caller's broker setups (`?brokerId`, `?active`) |
 | GET | `/api/v1/my-brokers/{id}` | detail |
 | POST | `/api/v1/my-brokers` | set a broker up |
+| POST | `/api/v1/my-brokers/setup` | setup + first account + key, one transaction |
 | PUT | `/api/v1/my-brokers/{id}` | rename / deactivate |
 | DELETE | `/api/v1/my-brokers/{id}` | delete (409 while accounts exist) |
 | GET | `/api/v1/my-brokers/{id}/credentials` | masked status |
@@ -1102,8 +1193,13 @@ export interface UserRiskLimits {
 | GET | `/api/v1/trading-accounts/{id}/credentials` | effective status (inherited + overrides) |
 | PUT | `/api/v1/trading-accounts/{id}/credentials` | override fields for this account |
 | DELETE | `/api/v1/trading-accounts/{id}/credentials` | drop the override, inherit again |
-| GET | `/api/v1/brokers` | reference (`?activeOnly`) |
-| GET | `/api/v1/brokers/{id}` | reference |
+| GET | `/api/v1/brokers` | catalog (`?activeOnly`) |
+| GET | `/api/v1/brokers/{id}` | detail |
+| GET | `/api/v1/brokers/by-code/{code}` | detail by unique code |
+| POST | `/api/v1/brokers` | add one to the catalog |
+| POST | `/api/v1/brokers/bulk` | add several, all or nothing |
+| PUT | `/api/v1/brokers/{id}` | update (code is immutable) |
+| DELETE | `/api/v1/brokers/{id}` | delete (409 while any setup uses it) |
 | GET | `/api/v1/exchanges` | reference (`?status`) |
 | GET | `/api/v1/exchanges/{id}` | reference |
 | GET | `/api/v1/symbols` | reference (`?exchangeId`, `?activeOnly`) |

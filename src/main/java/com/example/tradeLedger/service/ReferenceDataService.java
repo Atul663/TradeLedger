@@ -1,6 +1,5 @@
 package com.example.tradeLedger.service;
 
-import com.example.tradeLedger.dto.BrokerResponse;
 import com.example.tradeLedger.dto.ExchangeResponse;
 import com.example.tradeLedger.dto.RiskProfileResponse;
 import com.example.tradeLedger.dto.SymbolResponse;
@@ -28,20 +27,6 @@ public interface ReferenceDataService {
     List<ExchangeResponse> listExchanges(String status);
 
     ExchangeResponse getExchange(UUID id);
-
-    /**
-     * The brokers an account can be opened through.
-     *
-     * Separate from {@link #listExchanges} because the two answer different
-     * questions: an exchange is where an instrument trades, a broker is who the
-     * order is routed through. A credential form reads {@code authType} from
-     * here to know which fields that particular broker needs.
-     *
-     * @param activeOnly hides brokers the platform has retired
-     */
-    List<BrokerResponse> listBrokers(boolean activeOnly);
-
-    BrokerResponse getBroker(UUID id);
 
     /**
      * @param exchangeId optional filter

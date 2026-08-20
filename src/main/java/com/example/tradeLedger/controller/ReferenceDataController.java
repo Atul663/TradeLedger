@@ -1,6 +1,5 @@
 package com.example.tradeLedger.controller;
 
-import com.example.tradeLedger.dto.BrokerResponse;
 import com.example.tradeLedger.dto.ExchangeResponse;
 import com.example.tradeLedger.dto.RiskProfileResponse;
 import com.example.tradeLedger.dto.SymbolResponse;
@@ -47,20 +46,6 @@ public class ReferenceDataController extends SecuredController {
     public ExchangeResponse getExchange(@PathVariable UUID id) {
         log.info("GET exchange={} | user={}", id, currentEmail());
         return referenceDataService.getExchange(id);
-    }
-
-    @GetMapping("/brokers")
-    @Operation(summary = "List the brokers an account can trade through")
-    public List<BrokerResponse> listBrokers(@RequestParam(defaultValue = "true") boolean activeOnly) {
-        log.info("GET brokers activeOnly={} | user={}", activeOnly, currentEmail());
-        return referenceDataService.listBrokers(activeOnly);
-    }
-
-    @GetMapping("/brokers/{id}")
-    @Operation(summary = "Get one broker")
-    public BrokerResponse getBroker(@PathVariable UUID id) {
-        log.info("GET broker={} | user={}", id, currentEmail());
-        return referenceDataService.getBroker(id);
     }
 
     @GetMapping("/symbols")

@@ -1,5 +1,10 @@
 package com.example.tradeLedger.serviceImpl;
 
+import com.example.tradeLedger.dto.BrokerCredentialResponse;
+import com.example.tradeLedger.dto.BrokerSetupRequest;
+import com.example.tradeLedger.dto.BrokerSetupResponse;
+import com.example.tradeLedger.dto.TradingAccountRequest;
+import com.example.tradeLedger.dto.TradingAccountResponse;
 import com.example.tradeLedger.dto.UserBrokerRequest;
 import com.example.tradeLedger.dto.UserBrokerResponse;
 import com.example.tradeLedger.entity.Broker;
@@ -13,7 +18,9 @@ import com.example.tradeLedger.repository.BrokerCredentialRepository;
 import com.example.tradeLedger.repository.BrokerRepository;
 import com.example.tradeLedger.repository.TradingAccountRepository;
 import com.example.tradeLedger.repository.UserBrokerRepository;
+import com.example.tradeLedger.service.BrokerCredentialService;
 import com.example.tradeLedger.service.CurrentUserService;
+import com.example.tradeLedger.service.TradingAccountService;
 import com.example.tradeLedger.service.UserBrokerService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,17 +43,23 @@ public class UserBrokerServiceImpl implements UserBrokerService {
     private final BrokerRepository brokerRepository;
     private final TradingAccountRepository tradingAccountRepository;
     private final BrokerCredentialRepository credentialRepository;
+    private final TradingAccountService tradingAccountService;
+    private final BrokerCredentialService credentialService;
 
     public UserBrokerServiceImpl(CurrentUserService currentUserService,
                                  UserBrokerRepository userBrokerRepository,
                                  BrokerRepository brokerRepository,
                                  TradingAccountRepository tradingAccountRepository,
-                                 BrokerCredentialRepository credentialRepository) {
+                                 BrokerCredentialRepository credentialRepository,
+                                 TradingAccountService tradingAccountService,
+                                 BrokerCredentialService credentialService) {
         this.currentUserService = currentUserService;
         this.userBrokerRepository = userBrokerRepository;
         this.brokerRepository = brokerRepository;
         this.tradingAccountRepository = tradingAccountRepository;
         this.credentialRepository = credentialRepository;
+        this.tradingAccountService = tradingAccountService;
+        this.credentialService = credentialService;
     }
 
     @Override
@@ -147,6 +160,66 @@ public class UserBrokerServiceImpl implements UserBrokerService {
         credentialRepository.findByUserBroker_Id(id).forEach(credentialRepository::delete);
         userBrokerRepository.delete(setup);
         log.info("DELETE broker setup={} | user={}", id, email);
+    }
+
+    @Override
+    @Transactional
+    public BrokerSetupResponse setup(String email, BrokerSetupRequest request) {
+        if (request == null) {
+            throw new StrategyValidationException("Request body is required");
+        }
+        BrokerSetupRequest.CredentialsScope scope = request.getCredentialsScope() == null
+                ? BrokerSetupRequest.CredentialsScope.SETUP
+                : request.getCredentialsScope();
+        if (scope == BrokerSetupRequest.CredentialsScope.ACCOUNT && request.getAccount() == null) {
+            throw new StrategyValidationException(
+                    "credentialsScope=ACCOUNT needs an account to attach the credentials to. "
+                            + "Send an account, or leave the scope as SETUP.");
+        }
+
+        // Each step delegates to the endpoint that already owns it, so there is
+        // one copy of every validation and conflict rule. What this method adds
+        // is the transaction around all three.
+        UserBrokerRequest setupRequest = new UserBrokerRequest();
+        setupRequest.setBrokerId(request.getBrokerId());
+        setupRequest.setBrokerCode(request.getBrokerCode());
+        setupRequest.setLabel(request.getLabel());
+        setupRequest.setActive(request.getActive());
+        UserBrokerResponse broker = create(email, setupRequest);
+
+        TradingAccountResponse account = null;
+        if (request.getAccount() != null) {
+            TradingAccountRequest accountRequest = new TradingAccountRequest();
+            accountRequest.setUserBrokerId(broker.id());
+            accountRequest.setAccountName(request.getAccount().getAccountName());
+            accountRequest.setBrokerAccountId(request.getAccount().getBrokerAccountId());
+            accountRequest.setActive(request.getAccount().getActive());
+            account = tradingAccountService.create(email, accountRequest);
+        }
+
+        BrokerCredentialResponse credentials = null;
+        if (request.getCredentials() != null) {
+            credentials = scope == BrokerSetupRequest.CredentialsScope.ACCOUNT
+                    ? credentialService.upsertForAccount(email, account.id(), request.getCredentials())
+                    : credentialService.upsertForSetup(email, broker.id(), request.getCredentials());
+        }
+
+        // Both responses were built before the credentials existed, so their
+        // credentialsConfigured flags still read false. Re-read rather than hand
+        // the UI a snapshot that contradicts the credentials block beside it.
+        if (credentials != null) {
+            broker = get(email, broker.id());
+            if (account != null) {
+                account = tradingAccountService.get(email, account.id());
+            }
+        }
+
+        log.info("SETUP broker={} label='{}' account='{}' credentials={} | user={}",
+                broker.brokerCode(), broker.label(),
+                account != null ? account.accountName() : "none",
+                credentials != null ? scope : "none", email);
+
+        return new BrokerSetupResponse(broker, account, credentials);
     }
 
     // -------------------------------------------------------------- helpers

@@ -2,6 +2,8 @@ package com.example.tradeLedger.controller;
 
 import com.example.tradeLedger.dto.BrokerCredentialRequest;
 import com.example.tradeLedger.dto.BrokerCredentialResponse;
+import com.example.tradeLedger.dto.BrokerSetupRequest;
+import com.example.tradeLedger.dto.BrokerSetupResponse;
 import com.example.tradeLedger.dto.UserBrokerRequest;
 import com.example.tradeLedger.dto.UserBrokerResponse;
 import com.example.tradeLedger.service.BrokerCredentialService;
@@ -89,6 +91,30 @@ public class UserBrokerController extends SecuredController {
         String email = currentEmail();
         log.info("UPDATE broker setup={} | user={}", id, email);
         return userBrokerService.update(email, id, request);
+    }
+
+    /**
+     * The whole "add a broker" wizard in one call: setup, first account and
+     * API key, in one transaction.
+     *
+     * The three individual endpoints still work and are still the way to change
+     * any one of these later. This exists because doing them in sequence from a
+     * form leaves a hole - a key rejected on the third call would strand a setup
+     * and an account that cannot authenticate. Here that rolls all three back.
+     *
+     * {@code account} and {@code credentials} are both optional. Credentials go
+     * on the SETUP by default, which is what you want when the key belongs to
+     * the login rather than to one account - every later account inherits it.
+     */
+    @PostMapping("/setup")
+    @ResponseStatus(HttpStatus.CREATED)
+    @Operation(summary = "Create a broker setup, its first account and its API key in one call")
+    public BrokerSetupResponse setup(@RequestBody BrokerSetupRequest request) {
+        String email = currentEmail();
+        // The body holds secrets: log the broker, never the credentials.
+        log.info("SETUP broker='{}' | user={}",
+                request != null ? request.getBrokerCode() : null, email);
+        return userBrokerService.setup(email, request);
     }
 
     @DeleteMapping("/{id}")

@@ -1,5 +1,7 @@
 package com.example.tradeLedger.service;
 
+import com.example.tradeLedger.dto.BrokerSetupRequest;
+import com.example.tradeLedger.dto.BrokerSetupResponse;
 import com.example.tradeLedger.dto.UserBrokerRequest;
 import com.example.tradeLedger.dto.UserBrokerResponse;
 
@@ -27,6 +29,18 @@ public interface UserBrokerService {
     UserBrokerResponse get(String email, UUID id);
 
     UserBrokerResponse create(String email, UserBrokerRequest request);
+
+    /**
+     * The whole wizard in one call: setup, first account and API key, inside
+     * one transaction.
+     *
+     * Composes the three individual endpoints rather than duplicating them, so
+     * every validation and conflict rule is the same one. What it adds is
+     * atomicity: a rejected key rolls the setup and the account back with it,
+     * instead of leaving a half-built broker the user has to finish or clean
+     * up by hand.
+     */
+    BrokerSetupResponse setup(String email, BrokerSetupRequest request);
 
     /** Partial. The catalog broker cannot be changed - that is a different setup. */
     UserBrokerResponse update(String email, UUID id, UserBrokerRequest request);
