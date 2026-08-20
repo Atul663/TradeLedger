@@ -2,17 +2,18 @@ package com.example.tradeLedger.serviceImpl;
 
 import com.example.tradeLedger.dto.TradingAccountRequest;
 import com.example.tradeLedger.dto.TradingAccountResponse;
-import com.example.tradeLedger.entity.AccountCredential;
-import com.example.tradeLedger.entity.Exchange;
+import com.example.tradeLedger.entity.Broker;
+import com.example.tradeLedger.entity.BrokerCredential;
 import com.example.tradeLedger.entity.TradingAccount;
 import com.example.tradeLedger.entity.User;
+import com.example.tradeLedger.entity.UserBroker;
 import com.example.tradeLedger.exception.ResourceConflictException;
 import com.example.tradeLedger.exception.ResourceNotFoundException;
 import com.example.tradeLedger.exception.StrategyValidationException;
-import com.example.tradeLedger.repository.AccountCredentialRepository;
-import com.example.tradeLedger.repository.ExchangeRepository;
+import com.example.tradeLedger.repository.BrokerCredentialRepository;
 import com.example.tradeLedger.repository.StrategySubscriptionRepository;
 import com.example.tradeLedger.repository.TradingAccountRepository;
+import com.example.tradeLedger.repository.UserBrokerRepository;
 import com.example.tradeLedger.service.CurrentUserService;
 import com.example.tradeLedger.service.TradingAccountService;
 import org.slf4j.Logger;
@@ -20,9 +21,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.OffsetDateTime;
 import java.util.List;
-import java.util.Locale;
 import java.util.UUID;
 
 @Service
@@ -31,30 +30,37 @@ public class TradingAccountServiceImpl implements TradingAccountService {
     private static final Logger log = LoggerFactory.getLogger(TradingAccountServiceImpl.class);
 
     private static final int ACCOUNT_NAME_MAX = 100;
+    private static final int BROKER_ACCOUNT_ID_MAX = 100;
 
     private final CurrentUserService currentUserService;
     private final TradingAccountRepository tradingAccountRepository;
-    private final AccountCredentialRepository credentialRepository;
-    private final ExchangeRepository exchangeRepository;
+    private final UserBrokerRepository userBrokerRepository;
+    private final BrokerCredentialRepository credentialRepository;
     private final StrategySubscriptionRepository subscriptionRepository;
 
     public TradingAccountServiceImpl(CurrentUserService currentUserService,
                                      TradingAccountRepository tradingAccountRepository,
-                                     AccountCredentialRepository credentialRepository,
-                                     ExchangeRepository exchangeRepository,
+                                     UserBrokerRepository userBrokerRepository,
+                                     BrokerCredentialRepository credentialRepository,
                                      StrategySubscriptionRepository subscriptionRepository) {
         this.currentUserService = currentUserService;
         this.tradingAccountRepository = tradingAccountRepository;
+        this.userBrokerRepository = userBrokerRepository;
         this.credentialRepository = credentialRepository;
-        this.exchangeRepository = exchangeRepository;
         this.subscriptionRepository = subscriptionRepository;
     }
 
     @Override
     @Transactional(readOnly = true)
-    public List<TradingAccountResponse> list(String email) {
+    public List<TradingAccountResponse> list(String email, UUID userBrokerId) {
         User user = currentUserService.require(email);
-        return tradingAccountRepository.findByUser_IdOrderByAccountNameAsc(user.getId()).stream()
+        List<TradingAccount> accounts = userBrokerId != null
+                ? tradingAccountRepository.findByUserBroker_IdOrderByAccountNameAsc(userBrokerId)
+                : tradingAccountRepository.findByUser_IdOrderByAccountNameAsc(user.getId());
+        return accounts.stream()
+                // The by-setup query is not ownership-scoped on its own, so the
+                // filter is applied here rather than trusting the path parameter.
+                .filter(a -> a.getUser().getId().equals(user.getId()))
                 .map(this::toResponse)
                 .toList();
     }
@@ -73,28 +79,32 @@ public class TradingAccountServiceImpl implements TradingAccountService {
         if (request == null) {
             throw new StrategyValidationException("Request body is required");
         }
-        String accountName = requireAccountName(request.getAccountName());
-        Exchange exchange = resolveExchange(request);
+        if (request.getUserBrokerId() == null) {
+            throw new StrategyValidationException(
+                    "userBrokerId is required. Set the broker up first with POST /api/v1/my-brokers.");
+        }
+        UserBroker setup = userBrokerRepository.findByIdAndUser_Id(request.getUserBrokerId(), user.getId())
+                .orElseThrow(() -> ResourceNotFoundException.of("Broker setup", request.getUserBrokerId()));
+        if (!setup.isActive()) {
+            throw new StrategyValidationException("Broker setup is not active: " + setup.getLabel());
+        }
 
-        if (tradingAccountRepository.existsByUser_IdAndExchange_IdAndAccountName(
-                user.getId(), exchange.getId(), accountName)) {
+        String accountName = requireAccountName(request.getAccountName());
+        if (tradingAccountRepository.existsByUserBroker_IdAndAccountName(setup.getId(), accountName)) {
             throw new ResourceConflictException(
-                    "Account '" + accountName + "' already exists on exchange " + exchange.getCode());
+                    "Account '" + accountName + "' already exists under '" + setup.getLabel() + "'");
         }
 
         TradingAccount account = new TradingAccount();
         account.setUser(user);
-        account.setExchange(exchange);
+        account.setUserBroker(setup);
         account.setAccountName(accountName);
+        account.setBrokerAccountId(trimTo(request.getBrokerAccountId(), BROKER_ACCOUNT_ID_MAX, "brokerAccountId"));
         account.setActive(request.getActive() == null || request.getActive());
         account = tradingAccountRepository.save(account);
 
-        if (request.getVaultRef() != null && !request.getVaultRef().isBlank()) {
-            saveCredential(account, request.getVaultRef().trim());
-        }
-
-        log.info("CREATE trading account '{}' id={} exchange={} | user={}",
-                accountName, account.getId(), exchange.getCode(), email);
+        log.info("CREATE trading account '{}' id={} setup='{}' broker={} | user={}",
+                accountName, account.getId(), setup.getLabel(), setup.getBroker().getCode(), email);
         return toResponse(account);
     }
 
@@ -107,15 +117,27 @@ public class TradingAccountServiceImpl implements TradingAccountService {
             throw new StrategyValidationException("Request body is required");
         }
 
+        // Moving an account to another setup would leave it authenticating with a
+        // key that never issued it. Delete and recreate deliberately instead.
+        if (request.getUserBrokerId() != null
+                && !request.getUserBrokerId().equals(account.getUserBroker().getId())) {
+            throw new ResourceConflictException(
+                    "An account cannot move between broker setups. Create it under the other setup instead.");
+        }
+
         if (request.getAccountName() != null) {
             String accountName = requireAccountName(request.getAccountName());
             if (!accountName.equals(account.getAccountName())
-                    && tradingAccountRepository.existsByUser_IdAndExchange_IdAndAccountName(
-                            user.getId(), account.getExchange().getId(), accountName)) {
-                throw new ResourceConflictException("Account '" + accountName + "' already exists on exchange "
-                        + account.getExchange().getCode());
+                    && tradingAccountRepository.existsByUserBroker_IdAndAccountName(
+                            account.getUserBroker().getId(), accountName)) {
+                throw new ResourceConflictException("Account '" + accountName + "' already exists under '"
+                        + account.getUserBroker().getLabel() + "'");
             }
             account.setAccountName(accountName);
+        }
+        if (request.getBrokerAccountId() != null) {
+            account.setBrokerAccountId(request.getBrokerAccountId().isEmpty() ? null
+                    : trimTo(request.getBrokerAccountId(), BROKER_ACCOUNT_ID_MAX, "brokerAccountId"));
         }
         if (request.getActive() != null) {
             if (!request.getActive()) {
@@ -128,10 +150,6 @@ public class TradingAccountServiceImpl implements TradingAccountService {
             account.setActive(request.getActive());
         }
         tradingAccountRepository.save(account);
-
-        if (request.getVaultRef() != null && !request.getVaultRef().isBlank()) {
-            saveCredential(account, request.getVaultRef().trim());
-        }
 
         log.info("UPDATE trading account {} active={} | user={}", id, account.isActive(), email);
         return toResponse(account);
@@ -164,57 +182,45 @@ public class TradingAccountServiceImpl implements TradingAccountService {
         if (accountName == null || accountName.isBlank()) {
             throw new StrategyValidationException("accountName is required");
         }
-        String trimmed = accountName.trim();
-        if (trimmed.length() > ACCOUNT_NAME_MAX) {
-            throw new StrategyValidationException(
-                    "accountName must be at most " + ACCOUNT_NAME_MAX + " characters");
+        return trimTo(accountName, ACCOUNT_NAME_MAX, "accountName");
+    }
+
+    private static String trimTo(String value, int max, String field) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String trimmed = value.trim();
+        if (trimmed.length() > max) {
+            throw new StrategyValidationException(field + " must be at most " + max + " characters");
         }
         return trimmed;
     }
 
-    private Exchange resolveExchange(TradingAccountRequest request) {
-        if (request.getExchangeId() != null) {
-            return exchangeRepository.findById(request.getExchangeId())
-                    .orElseThrow(() -> ResourceNotFoundException.of("Exchange", request.getExchangeId()));
-        }
-        if (request.getExchangeCode() != null && !request.getExchangeCode().isBlank()) {
-            String code = request.getExchangeCode().trim().toUpperCase(Locale.ROOT);
-            return exchangeRepository.findByCode(code)
-                    .orElseThrow(() -> ResourceNotFoundException.of("Exchange", code));
-        }
-        throw new StrategyValidationException("exchangeId or exchangeCode is required");
-    }
-
-    /**
-     * Only the Vault pointer is persisted. {@code rotated_at} is stamped whenever
-     * the reference changes, which is the audit trail the schema asks for.
-     */
-    private void saveCredential(TradingAccount account, String vaultRef) {
-        AccountCredential credential = credentialRepository.findByTradingAccount_Id(account.getId())
-                .orElseGet(() -> {
-                    AccountCredential fresh = new AccountCredential();
-                    fresh.setTradingAccount(account);
-                    return fresh;
-                });
-        if (credential.getId() != null && !vaultRef.equals(credential.getVaultRef())) {
-            credential.setRotatedAt(OffsetDateTime.now());
-        }
-        credential.setVaultRef(vaultRef);
-        credentialRepository.save(credential);
-    }
-
     private TradingAccountResponse toResponse(TradingAccount account) {
-        AccountCredential credential = credentialRepository.findByTradingAccount_Id(account.getId()).orElse(null);
-        Exchange exchange = account.getExchange();
+        UserBroker setup = account.getUserBroker();
+        Broker broker = setup != null ? setup.getBroker() : null;
+
+        BrokerCredential own = credentialRepository.findByTradingAccount_Id(account.getId()).orElse(null);
+        BrokerCredential inherited = setup == null ? null
+                : credentialRepository.findByUserBroker_IdAndTradingAccountIsNull(setup.getId()).orElse(null);
+
+        // "Can authenticate" is true either way round: its own key, or the one it
+        // inherits. Which of the two is a separate flag, not a separate answer.
+        boolean configured = (own != null && own.hasAnyValue()) || (inherited != null && inherited.hasAnyValue());
+
         return new TradingAccountResponse(
                 account.getId(),
-                exchange.getId(),
-                exchange.getCode(),
-                exchange.getName(),
+                setup != null ? setup.getId() : null,
+                setup != null ? setup.getLabel() : null,
+                broker != null ? broker.getId() : null,
+                broker != null ? broker.getCode() : null,
+                broker != null ? broker.getName() : null,
+                broker != null ? broker.getAuthType() : null,
                 account.getAccountName(),
+                account.getBrokerAccountId(),
                 account.isActive(),
-                credential != null ? credential.getVaultRef() : null,
-                credential != null ? credential.getRotatedAt() : null,
+                configured,
+                own != null && own.hasAnyValue(),
                 subscriptionRepository.countByTradingAccount_IdAndActiveTrue(account.getId()),
                 account.getCreatedAt(),
                 account.getUpdatedAt());

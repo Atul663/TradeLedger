@@ -20,10 +20,12 @@ migration that renamed the strategy-module tables.
 |---|---|---|---|
 | `User` | `users` | `id` uuid | Control-plane identity. **Not** the auth table. |
 | `UserRiskLimit` | `user_risk_limits` | `user_id` uuid | 1:1 with `users`, aggregate caps |
-| `Exchange` | `exchanges` | `id` uuid | |
+| `Exchange` | `exchanges` | `id` uuid | The venue an instrument trades on |
+| `Broker` | `brokers` | `id` uuid | `code` unique; who the order is routed through |
 | `Symbol` | `symbols` | `id` uuid | `UNIQUE (exchange_id, symbol)` |
-| `TradingAccount` | `trading_accounts` | `id` uuid | `UNIQUE (user_id, exchange_id, account_name)` |
-| `AccountCredential` | `account_credentials` | `id` uuid | 1:1, `vault_ref` only — no secrets |
+| `UserBroker` | `user_brokers` | `id` uuid | `UNIQUE (user_id, label)`; FK to `brokers` |
+| `TradingAccount` | `trading_accounts` | `id` uuid | `UNIQUE (user_broker_id, account_name)`; no exchange column |
+| `BrokerCredential` | `broker_credentials` | `id` uuid | Two levels via nullable `trading_account_id`; ciphertext, never plaintext |
 | `StrategyTemplate` | `strategy_templates` | `id` uuid | `name` unique; `rule_tree` jsonb |
 | `Indicator` | `indicators` | `id` uuid | `param_schema` jsonb; no `updated_at` |
 | `StrategyParamDefinition` | `strategy_param_definitions` | `id` bigserial | `UNIQUE (strategy_id, parameter_key)` |
@@ -43,24 +45,31 @@ Column names map 1:1 (`is_active` → `active`, `is_system` → `system`,
 always the SQL name). Verified by generating the Hibernate DDL and diffing the
 table and column names against the SQL file.
 
-Pre-existing tables — `google_auth_tokens` (was `user_details`), `dhan_access_tokens`
+Pre-existing tables — `google_auth_tokens` (was `user_details`)
 and `platform_strategy_toggles` (was `strategy_config`) — keep their columns and
-data; only their names changed, in the same migration.
+data; only their names changed, in the same migration. `dhan_access_tokens` is
+dropped by step 7 of that migration: tokens now live per account in
+`broker_credentials.access_token`.
 
 ---
 
 ## 2. Relationships
 
 ```
-users ──< trading_accounts >── exchanges ──< symbols
-  │              │                              │
-  │              └──── 1:1 ── account_credentials
-  │                                             │
-  └──< subscriptions >── shared_strategy_configs ────┘   (symbol_id = SIGNAL symbol)
-             │                    │
-       risk_profiles          strategies ──< strategy_param_definitions
-                                   │
-                              rule_tree  ──(by name)──> indicators
+brokers                                     exchanges ──< symbols
+   │  catalog, shared by every user                          │
+   │                                                         │
+users ──< user_brokers ──< trading_accounts                  │
+  │            │                   │                         │
+  │            └──< broker_credentials                       │
+  │                 trading_account_id NULL -> the setup key │
+  │                 trading_account_id SET  -> one override  │
+  │                                                          │
+  └──< user_strategy_subscriptions >── shared_strategy_configs ──┘
+                    │                        │      (symbol_id = SIGNAL symbol)
+              risk_profiles          strategy_templates ──< strategy_param_definitions
+                                             │
+                                        rule_tree ──(by name)──> indicators
 ```
 
 **Strategy → indicator.** There is no join table, by design. A strategy declares
@@ -206,10 +215,20 @@ subscription.
 `GET /indicator-plan` — the dedup report: active subscriptions vs distinct
 indicator computations. It carries counts and fingerprints only, no identifiers.
 
+### Broker setups — `/api/v1/my-brokers`
+
+`GET /`, `GET /{id}`, `POST /` (201), `PUT /{id}`, `DELETE /{id}` (204),
+plus `GET|PUT|DELETE /{id}/credentials`. Step one: the setup holds the login
+and the API key every account under it inherits. 409 on delete while accounts
+still hang off it, and a setup cannot change broker.
+
 ### Trading accounts — `/api/v1/trading-accounts`
 
-`GET /`, `GET /{id}`, `POST /` (201), `PUT /{id}`, `DELETE /{id}` (204).
-`vaultRef` writes `account_credentials` and stamps `rotated_at` on change.
+`GET /` (`?userBrokerId`), `GET /{id}`, `POST /` (201), `PUT /{id}`,
+`DELETE /{id}` (204), plus `GET|PUT|DELETE /{id}/credentials`.
+An account belongs to a setup and inherits its credentials; the credentials
+sub-resource here writes an override, resolved per field, and `rotated_at` is
+stamped whenever a secret changes.
 
 ### Reference data — `/api/v1`
 

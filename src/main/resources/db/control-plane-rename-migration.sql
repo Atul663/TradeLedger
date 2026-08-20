@@ -29,12 +29,19 @@
 --   indicator_defs           ->  indicators
 --   indicator_parameters     ->  indicator_parameter_links
 --   user_details             ->  google_auth_tokens
---   dhan_access_token        ->  dhan_access_tokens
 --   subscriptions.strategy_instance_id
 --                            ->  user_strategy_subscriptions.shared_config_id
 --
+-- REMOVED:
+--   dhan_access_tokens  (and dhan_access_token, its pre-rename name)
+--   account_credentials (replaced by broker_credentials)
+--   trading_accounts.exchange_id, trading_accounts.broker_id
+
 -- NEW TABLES (created by control-plane-schema.sql, not here):
 --   user_strategies / user_strategy_indicators / user_strategy_parameters
+--   brokers / user_brokers / broker_credentials
+--   (plus trading_accounts.user_broker_id and .broker_account_id, added by
+--    ALTER in that same file)
 -- ============================================================================
 
 BEGIN;
@@ -64,8 +71,7 @@ BEGIN
       ('strategy_config',              'platform_strategy_toggles'),
       ('indicator_defs',               'indicators'),
       ('indicator_parameters',         'indicator_parameter_links'),
-      ('user_details',                 'google_auth_tokens'),
-      ('dhan_access_token',            'dhan_access_tokens')
+      ('user_details',                 'google_auth_tokens')
     ) AS v(old_name, new_name)
   LOOP
     IF to_regclass(r.old_name) IS NOT NULL AND to_regclass(r.new_name) IS NULL THEN
@@ -168,6 +174,90 @@ BEGIN
                     'Convert its signal_params/exec_params jsonb into '
                     'user_strategy_parameters rows, then drop it by hand.', rows_left;
     END IF;
+  END IF;
+END $$;
+
+
+-- ---------------------------------------------------------------------------
+-- 7. Retire the Dhan token tables.
+--
+-- dhan_access_tokens held ONE row for the whole platform - no user_id, no
+-- trading_account_id - and getLatestToken() handed it to whoever asked, so every
+-- user shared a single Dhan session. Tokens now live per account, encrypted, in
+-- account_credentials.access_token.
+--
+-- Nothing is migrated automatically and nothing can be: the old row has no
+-- column saying whose token it is. If it holds a row, re-enter that token
+-- against the right account with
+--   PUT /api/v1/trading-accounts/{id}/credentials {"accessToken": "..."}
+-- and drop the table by hand.
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE
+  t text;
+  rows_left bigint;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['dhan_access_tokens', 'dhan_access_token'] LOOP
+    IF to_regclass(t) IS NOT NULL THEN
+      EXECUTE format('SELECT count(*) FROM %I', t) INTO rows_left;
+      IF rows_left = 0 THEN
+        EXECUTE format('DROP TABLE %I', t);
+        RAISE NOTICE 'dropped empty % (tokens now live in account_credentials)', t;
+      ELSE
+        RAISE WARNING '% still holds % row(s) and was NOT dropped. That token belongs '
+                      'to no particular user, so it cannot be migrated for you - '
+                      're-enter it per trading account, then drop the table by hand.',
+                      t, rows_left;
+      END IF;
+    END IF;
+  END LOOP;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 8. Retire account_credentials and the columns the setup layer replaced.
+--
+-- Credentials used to sit 1:1 on a trading account, and the account itself
+-- carried exchange_id and broker_id. Both are superseded by:
+--
+--   user_brokers        the setup, and the API key every account under it uses
+--   broker_credentials  that key, plus any single account's override of it
+--
+-- account_credentials is dropped ONLY when empty. If it holds rows they cannot be
+-- moved automatically: there are no user_brokers rows to attach them to, and
+-- deciding which setup each key belongs to is a judgement call. Create the setups
+-- first with POST /api/v1/my-brokers, re-enter the keys against them, then drop
+-- the table by hand.
+--
+-- trading_accounts.exchange_id and .broker_id are dropped outright. Nothing read
+-- exchange_id but the duplicate-name check, and broker_id existed for one
+-- revision before user_broker_id replaced it.
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE
+  rows_left bigint;
+BEGIN
+  IF to_regclass('account_credentials') IS NOT NULL THEN
+    EXECUTE 'SELECT count(*) FROM account_credentials' INTO rows_left;
+    IF rows_left = 0 THEN
+      DROP TABLE account_credentials;
+      RAISE NOTICE 'dropped empty account_credentials (replaced by broker_credentials)';
+    ELSE
+      RAISE WARNING 'account_credentials still holds % row(s) and was NOT dropped. '
+                    'Create the broker setups first, re-enter the keys against them, '
+                    'then drop the table by hand.', rows_left;
+    END IF;
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+              WHERE table_name = 'trading_accounts' AND column_name = 'exchange_id') THEN
+    ALTER TABLE trading_accounts DROP COLUMN exchange_id;
+    RAISE NOTICE 'dropped trading_accounts.exchange_id (venue comes from the symbol)';
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+              WHERE table_name = 'trading_accounts' AND column_name = 'broker_id') THEN
+    ALTER TABLE trading_accounts DROP COLUMN broker_id;
+    RAISE NOTICE 'dropped trading_accounts.broker_id (superseded by user_broker_id)';
   END IF;
 END $$;
 

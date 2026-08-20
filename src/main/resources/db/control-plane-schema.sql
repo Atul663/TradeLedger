@@ -142,35 +142,217 @@ DROP TRIGGER IF EXISTS trg_symbols_touch ON symbols;
 CREATE TRIGGER trg_symbols_touch BEFORE UPDATE ON symbols
   FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
 
-CREATE TABLE IF NOT EXISTS trading_accounts (
+-- ---------------------------------------------------------------------------
+-- BROKERS - who the order is placed through.
+--
+-- Deliberately not rows in `exchanges`. An exchange is the venue an instrument
+-- trades on and is what `symbols` has a foreign key to; a broker is the API the
+-- platform authenticates against to reach it. One account trades NSE through
+-- Dhan, so folding the two together would mix venue rows and broker rows in the
+-- table every symbol depends on.
+--
+-- auth_type tells a credential form which fields on broker_credentials this
+-- broker actually needs, so one form serves all of them:
+--   api_key        key + secret, no browser step
+--   oauth_redirect key + secret + redirect URL, exchanged for a daily token
+--   totp           key + secret + client id + TOTP seed
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS brokers (
   id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id      uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  exchange_id  uuid NOT NULL REFERENCES exchanges(id),
-  account_name varchar(100) NOT NULL,
+  code         varchar(30) NOT NULL UNIQUE,      -- DHAN, ZERODHA, UPSTOX
+  name         varchar(100) NOT NULL,
+  description  text,
+  api_base_url text,
+  auth_type    varchar(30) NOT NULL DEFAULT 'api_key'
+               CHECK (auth_type IN ('api_key','oauth_redirect','totp')),
   is_active    boolean NOT NULL DEFAULT true,
   created_at   timestamptz NOT NULL DEFAULT now(),
-  updated_at   timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (user_id, exchange_id, account_name)
+  updated_at   timestamptz NOT NULL DEFAULT now()
+);
+DROP TRIGGER IF EXISTS trg_brokers_touch ON brokers;
+CREATE TRIGGER trg_brokers_touch BEFORE UPDATE ON brokers
+  FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+INSERT INTO brokers (code, name, description, api_base_url, auth_type) VALUES
+  ('DELTA',   'Delta Exchange', 'Delta India: broker and venue in one',
+                                     'https://api.india.delta.exchange', 'api_key'),
+  ('DHAN',    'Dhan',      'Dhan partner API',     'https://api.dhan.co',        'api_key'),
+  ('ZERODHA', 'Zerodha',   'Kite Connect',         'https://api.kite.trade',     'oauth_redirect'),
+  ('UPSTOX',  'Upstox',    'Upstox API v2',        'https://api.upstox.com',     'oauth_redirect'),
+  ('ANGELONE','Angel One', 'SmartAPI',             'https://apiconnect.angelone.in', 'totp')
+ON CONFLICT (code) DO NOTHING;
+
+-- ---------------------------------------------------------------------------
+-- USER BROKERS - one user's authenticated setup with one broker, and the parent
+-- of every trading account reached through it.
+--
+--   brokers            DELTA, DHAN, ZERODHA        shared catalog
+--     user_brokers     "My Delta"                  one user's setup + its API key
+--       trading_accounts  main, hedge, algo-1      the accounts it reaches
+--
+-- The same shape as user_strategies: `brokers` is the catalog every user shares,
+-- this is one user's instance of a row in it.
+--
+-- Unique on (user_id, label) rather than (user_id, broker_id), so two separate
+-- Delta logins are two setups rather than a conflict.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS user_brokers (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  broker_id  uuid NOT NULL REFERENCES brokers(id),
+  label      varchar(100) NOT NULL,      -- the user's own name for this setup
+  is_active  boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT uq_user_brokers_user_label UNIQUE (user_id, label)
+);
+CREATE INDEX IF NOT EXISTS idx_user_brokers_user   ON user_brokers (user_id);
+CREATE INDEX IF NOT EXISTS idx_user_brokers_broker ON user_brokers (broker_id);
+DROP TRIGGER IF EXISTS trg_user_brokers_touch ON user_brokers;
+CREATE TRIGGER trg_user_brokers_touch BEFORE UPDATE ON user_brokers
+  FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+-- ---------------------------------------------------------------------------
+-- TRADING ACCOUNTS - one account under a setup; what a strategy subscribes to.
+--
+-- NO EXCHANGE COLUMN. It used to carry one, which forced a Dhan login that
+-- reaches NSE and BSE into two rows and made a venue-less broker like Delta pick
+-- a meaningless value. Where an order goes is decided by the symbol, which
+-- already knows its exchange.
+--
+-- user_id is kept even though user_brokers already knows the owner: ownership
+-- filtering happens on every read and joining through the parent to do it would
+-- turn the cheapest, most frequent check in the module into a two-table query.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS trading_accounts (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id           uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_broker_id    uuid REFERENCES user_brokers(id),   -- NOT NULL once migrated
+  account_name      varchar(100) NOT NULL,
+  broker_account_id varchar(100),   -- the broker's own id: Delta sub-account, Dhan client id
+  is_active         boolean NOT NULL DEFAULT true,
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  updated_at        timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_taccounts_user ON trading_accounts (user_id) WHERE is_active;
+CREATE INDEX IF NOT EXISTS idx_taccounts_setup ON trading_accounts (user_broker_id);
 DROP TRIGGER IF EXISTS trg_taccounts_touch ON trading_accounts;
 CREATE TRIGGER trg_taccounts_touch BEFORE UPDATE ON trading_accounts
   FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
 
--- Vault references ONLY. No api_key/api_secret/passphrase columns: secrets
--- live in Vault; the adapter resolves vault_ref at startup.
-CREATE TABLE IF NOT EXISTS account_credentials (
+-- Columns and constraints for a database that predates the setup layer. Each is
+-- guarded, so this is a no-op on a fresh database and a migration on an old one.
+ALTER TABLE trading_accounts ADD COLUMN IF NOT EXISTS user_broker_id    uuid REFERENCES user_brokers(id);
+ALTER TABLE trading_accounts ADD COLUMN IF NOT EXISTS broker_account_id varchar(100);
+
+-- The account name is unique within its SETUP. A Delta "main" and a Dhan "main"
+-- are different accounts that happen to share a label, not a conflict. Every
+-- earlier key is dropped by name; ddl-auto=update never alters one in place.
+DO $$
+DECLARE
+  legacy text;
+BEGIN
+  FOREACH legacy IN ARRAY ARRAY['trading_accounts_user_id_exchange_id_account_name_key',
+                                'uq_taccounts_user_exchange_name',
+                                'uq_taccounts_user_broker_account'] LOOP
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = legacy) THEN
+      EXECUTE format('ALTER TABLE trading_accounts DROP CONSTRAINT %I', legacy);
+      RAISE NOTICE 'dropped legacy unique constraint %', legacy;
+    END IF;
+  END LOOP;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_taccounts_broker_account') THEN
+    ALTER TABLE trading_accounts
+      ADD CONSTRAINT uq_taccounts_broker_account UNIQUE (user_broker_id, account_name);
+    RAISE NOTICE 'added uq_taccounts_broker_account';
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- BROKER CREDENTIALS - what authenticates to a broker, at either of two levels.
+--
+--   trading_account_id IS NULL  -> the setup's own key, used by all its accounts
+--   trading_account_id IS SET   -> one account's override of it
+--
+-- Two levels because that is how brokers differ. A Dhan login issues one key for
+-- everything under it; a Delta sub-account can be issued its own.
+--
+-- RESOLUTION IS PER FIELD, not per row: an override holding only an access token
+-- still uses the setup's api_key and api_secret. Same rule as
+-- user_strategy_parameters, and the reason "this sub-account has its own session
+-- token" is a one-field write instead of a copy that then drifts.
+--
+-- The secret columns hold AES-GCM ciphertext written by SecretCipher (key:
+-- CREDENTIAL_ENCRYPTION_KEY), stored as 'v1:base64(iv||ciphertext||tag)'. A dump
+-- without that key yields nothing usable.
+--
+-- redirect_url and client_id are plaintext on purpose: a callback URL is
+-- registered publicly with the broker and a client id is an account number.
+-- Encrypting them would cost searchability and protect nothing.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS broker_credentials (
   id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  trading_account_id uuid NOT NULL UNIQUE
-                     REFERENCES trading_accounts(id) ON DELETE CASCADE,
-  vault_ref          text NOT NULL,     -- e.g. secret/brokers/deribit/acct-123
+  user_broker_id     uuid NOT NULL REFERENCES user_brokers(id) ON DELETE CASCADE,
+  trading_account_id uuid REFERENCES trading_accounts(id) ON DELETE CASCADE,
+  api_key            text,          -- ciphertext
+  api_secret         text,          -- ciphertext
+  access_token       text,          -- ciphertext
+  refresh_token      text,          -- ciphertext
+  totp_secret        text,          -- ciphertext
+  redirect_url       text,          -- plaintext: public OAuth callback
+  client_id          varchar(100),  -- plaintext: the broker's login identifier
+  token_expires_at   timestamptz,
+  vault_ref          text,          -- optional pointer, for Vault installations
   rotated_at         timestamptz,
   created_at         timestamptz NOT NULL DEFAULT now(),
   updated_at         timestamptz NOT NULL DEFAULT now()
 );
-DROP TRIGGER IF EXISTS trg_creds_touch ON account_credentials;
-CREATE TRIGGER trg_creds_touch BEFORE UPDATE ON account_credentials
+
+-- One row per level. Two partial indexes rather than one UNIQUE: Postgres treats
+-- NULLs as distinct, so a plain UNIQUE over the nullable column would happily
+-- let a setup hold two sets of credentials.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_broker_creds_setup
+  ON broker_credentials (user_broker_id)
+  WHERE trading_account_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_broker_creds_account
+  ON broker_credentials (trading_account_id)
+  WHERE trading_account_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_broker_creds_setup ON broker_credentials (user_broker_id);
+
+DROP TRIGGER IF EXISTS trg_broker_creds_touch ON broker_credentials;
+CREATE TRIGGER trg_broker_creds_touch BEFORE UPDATE ON broker_credentials
   FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+-- The effective-credential read, for anything talking to the database directly.
+--
+-- The REST API is authoritative - GET /api/v1/trading-accounts/{id}/credentials
+-- returns the same resolution, masked. This view exists so a report can answer
+-- "which accounts can actually authenticate" in one query. It deliberately
+-- exposes NO secret: only whether each field resolves to something.
+CREATE OR REPLACE VIEW trading_account_credential_status AS
+SELECT ta.id                AS trading_account_id,
+       ta.user_id,
+       ta.account_name,
+       ta.broker_account_id,
+       ub.id                AS user_broker_id,
+       ub.label             AS setup_label,
+       b.code               AS broker_code,
+       b.auth_type,
+       COALESCE(own.api_key,       setup.api_key)       IS NOT NULL AS has_api_key,
+       COALESCE(own.api_secret,    setup.api_secret)    IS NOT NULL AS has_api_secret,
+       COALESCE(own.access_token,  setup.access_token)  IS NOT NULL AS has_access_token,
+       COALESCE(own.totp_secret,   setup.totp_secret)   IS NOT NULL AS has_totp_secret,
+       COALESCE(own.client_id,     setup.client_id)                 AS client_id,
+       COALESCE(own.redirect_url,  setup.redirect_url)              AS redirect_url,
+       COALESCE(own.token_expires_at, setup.token_expires_at)       AS token_expires_at,
+       (own.id IS NOT NULL)                                         AS has_own_credentials
+FROM trading_accounts ta
+JOIN user_brokers ub ON ub.id = ta.user_broker_id
+JOIN brokers      b  ON b.id  = ub.broker_id
+LEFT JOIN broker_credentials setup
+       ON setup.user_broker_id = ub.id AND setup.trading_account_id IS NULL
+LEFT JOIN broker_credentials own
+       ON own.trading_account_id = ta.id;
 
 -- ---------------------------------------------------------------------------
 -- Strategy templates and their tunable knobs

@@ -7,6 +7,7 @@ import com.example.tradeLedger.controller.StrategyTemplateController;
 import com.example.tradeLedger.controller.SharedStrategyConfigController;
 import com.example.tradeLedger.controller.StrategySubscriptionController;
 import com.example.tradeLedger.controller.TradingAccountController;
+import com.example.tradeLedger.controller.UserBrokerController;
 import com.example.tradeLedger.controller.UserStrategyController;
 import com.example.tradeLedger.dto.ApiError;
 import org.slf4j.Logger;
@@ -24,7 +25,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
  * Error mapping for the strategy-module endpoints.
  *
  * Scoped by {@code assignableTypes} rather than applied globally on purpose: the
- * authentication and Dhan controllers already build their own responses, and
+ * authentication controllers already build their own responses, and
  * quietly changing how their failures render would be a behaviour change to code
  * this work is not meant to touch.
  */
@@ -36,7 +37,8 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
         StrategySubscriptionController.class,
         TradingAccountController.class,
         ReferenceDataController.class,
-        UserStrategyController.class
+        UserStrategyController.class,
+        UserBrokerController.class
 })
 public class StrategyApiExceptionHandler {
 

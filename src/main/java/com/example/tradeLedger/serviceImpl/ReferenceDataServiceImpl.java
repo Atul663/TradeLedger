@@ -1,10 +1,12 @@
 package com.example.tradeLedger.serviceImpl;
 
+import com.example.tradeLedger.dto.BrokerResponse;
 import com.example.tradeLedger.dto.ExchangeResponse;
 import com.example.tradeLedger.dto.RiskProfileResponse;
 import com.example.tradeLedger.dto.SymbolResponse;
 import com.example.tradeLedger.dto.UserRiskLimitRequest;
 import com.example.tradeLedger.dto.UserRiskLimitResponse;
+import com.example.tradeLedger.entity.Broker;
 import com.example.tradeLedger.entity.Exchange;
 import com.example.tradeLedger.entity.RiskProfile;
 import com.example.tradeLedger.entity.Symbol;
@@ -12,6 +14,7 @@ import com.example.tradeLedger.entity.User;
 import com.example.tradeLedger.entity.UserRiskLimit;
 import com.example.tradeLedger.exception.ResourceNotFoundException;
 import com.example.tradeLedger.exception.StrategyValidationException;
+import com.example.tradeLedger.repository.BrokerRepository;
 import com.example.tradeLedger.repository.ExchangeRepository;
 import com.example.tradeLedger.repository.RiskProfileRepository;
 import com.example.tradeLedger.repository.SymbolRepository;
@@ -35,17 +38,20 @@ public class ReferenceDataServiceImpl implements ReferenceDataService {
     private static final Logger log = LoggerFactory.getLogger(ReferenceDataServiceImpl.class);
 
     private final ExchangeRepository exchangeRepository;
+    private final BrokerRepository brokerRepository;
     private final SymbolRepository symbolRepository;
     private final RiskProfileRepository riskProfileRepository;
     private final UserRiskLimitRepository userRiskLimitRepository;
     private final CurrentUserService currentUserService;
 
     public ReferenceDataServiceImpl(ExchangeRepository exchangeRepository,
+                                    BrokerRepository brokerRepository,
                                     SymbolRepository symbolRepository,
                                     RiskProfileRepository riskProfileRepository,
                                     UserRiskLimitRepository userRiskLimitRepository,
                                     CurrentUserService currentUserService) {
         this.exchangeRepository = exchangeRepository;
+        this.brokerRepository = brokerRepository;
         this.symbolRepository = symbolRepository;
         this.riskProfileRepository = riskProfileRepository;
         this.userRiskLimitRepository = userRiskLimitRepository;
@@ -68,6 +74,24 @@ public class ReferenceDataServiceImpl implements ReferenceDataService {
     public ExchangeResponse getExchange(UUID id) {
         return toResponse(exchangeRepository.findById(id)
                 .orElseThrow(() -> ResourceNotFoundException.of("Exchange", id)));
+    }
+
+    // -------------------------------------------------------------- brokers
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<BrokerResponse> listBrokers(boolean activeOnly) {
+        List<Broker> brokers = activeOnly
+                ? brokerRepository.findByActiveTrueOrderByNameAsc()
+                : brokerRepository.findAllByOrderByNameAsc();
+        return brokers.stream().map(ReferenceDataServiceImpl::toResponse).toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public BrokerResponse getBroker(UUID id) {
+        return toResponse(brokerRepository.findById(id)
+                .orElseThrow(() -> ResourceNotFoundException.of("Broker", id)));
     }
 
     // -------------------------------------------------------------- symbols
@@ -160,6 +184,11 @@ public class ReferenceDataServiceImpl implements ReferenceDataService {
     }
 
     // -------------------------------------------------------------- mapping
+
+    private static BrokerResponse toResponse(Broker broker) {
+        return new BrokerResponse(broker.getId(), broker.getCode(), broker.getName(),
+                broker.getDescription(), broker.getApiBaseUrl(), broker.getAuthType(), broker.isActive());
+    }
 
     private ExchangeResponse toResponse(Exchange exchange) {
         return new ExchangeResponse(exchange.getId(), exchange.getName(), exchange.getCode(),

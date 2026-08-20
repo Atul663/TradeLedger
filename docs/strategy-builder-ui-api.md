@@ -189,7 +189,8 @@ Badges to render per item:
 Steps 2–4 can run in parallel with 1.
 
 **A subscription requires a trading account.** If `GET /trading-accounts` returns
-`[]`, route the user to account creation first — don't let them fill the whole
+`[]`, route the user to **broker setup first** — `POST /api/v1/my-brokers`, then
+its credentials, then the account. Do not let them fill the whole subscription
 form and fail at submit.
 
 Render the form from `params[]` (see §6). Submit *all* knob values flat in
@@ -588,45 +589,165 @@ Three users on 9×21, 9×50 and 13×21 cost four EMA computations, not six. Good
 
 ---
 
-### 5.6 Trading accounts — `/api/v1/trading-accounts`
+### 5.6 Broker setups — `/api/v1/my-brokers`
 
-Scoped to the caller. Required before any subscription can be created.
+**Set the broker up first, then create accounts in it.** One setup holds one
+login and its API key; the accounts underneath it share that key.
+
+```
+GET /api/v1/brokers            DELTA, DHAN, ZERODHA ...   shared catalog
+  POST /api/v1/my-brokers      "My Delta"                 the caller's setup
+    PUT  .../{id}/credentials  api key + secret           entered once
+      POST /api/v1/trading-accounts   main, hedge         the accounts
+```
 
 | Method | Path | Status |
 |---|---|---|
-| GET | `/api/v1/trading-accounts` | 200 → `TradingAccount[]` |
+| GET | `/api/v1/my-brokers` (`?brokerId`, `?active`) | 200 → `UserBroker[]` |
+| GET | `/api/v1/my-brokers/{id}` | 200 · 404 |
+| POST | `/api/v1/my-brokers` | **201** · 400 · 404 · 409 |
+| PUT | `/api/v1/my-brokers/{id}` | 200 · 400 · 404 · 409 |
+| DELETE | `/api/v1/my-brokers/{id}` | **204** · 404 · 409 |
+
+```json
+{ "brokerCode": "DELTA" }
+```
+
+That is the whole create body. `label` defaults to the broker's name, so one
+setup per broker needs nothing else. A second Delta login needs a distinct label
+— `UNIQUE (user_id, label)`.
+
+```json
+{ "id": "77aa...", "brokerId": "b1c2...", "brokerCode": "DELTA",
+  "brokerName": "Delta Exchange", "authType": "api_key",
+  "label": "My Delta", "active": true,
+  "credentialsConfigured": true,
+  "tradingAccountCount": 3, "accountsWithOwnCredentials": 1,
+  "rotatedAt": null, "createdAt": "...", "updatedAt": "..." }
+```
+
+**A setup cannot change broker** (409). Its key and all its accounts belong to
+the broker that issued them; a different broker is a different setup.
+
+**409 on delete** while `tradingAccountCount > 0` — offer "deactivate" instead.
+
+Credentials live at `.../my-brokers/{id}/credentials` — see 5.8.
+
+---
+
+### 5.7 Trading accounts — `/api/v1/trading-accounts`
+
+The accounts under a setup. This is what a subscription points at.
+
+| Method | Path | Status |
+|---|---|---|
+| GET | `/api/v1/trading-accounts` (`?userBrokerId`) | 200 → `TradingAccount[]` |
 | GET | `/api/v1/trading-accounts/{id}` | 200 · 404 |
 | POST | `/api/v1/trading-accounts` | **201** · 400 · 404 · 409 |
 | PUT | `/api/v1/trading-accounts/{id}` | 200 · 400 · 404 · 409 |
 | DELETE | `/api/v1/trading-accounts/{id}` | **204** · 404 · 409 |
 
 ```json
-{ "exchangeCode": "NSE", "accountName": "Primary", "active": true,
-  "vaultRef": "secret/brokers/dhan/acct-123" }
+{ "userBrokerId": "77aa...", "accountName": "main",
+  "brokerAccountId": "42891" }
 ```
 
-`exchangeId` or `exchangeCode` required; `accountName` required (≤100), unique per
-user per exchange. PUT is partial; the exchange cannot be changed.
+`userBrokerId` and `accountName` required; `accountName` unique **within the
+setup**, so a Delta "main" and a Dhan "main" coexist. `brokerAccountId` is the
+broker's own id for this account — a Delta sub-account id, a Dhan client id — and
+is what tells two accounts under one shared key apart when an order goes out.
 
-> **`vaultRef` is a pointer, never a secret.** The schema has no api-key or
-> secret columns on purpose. Never collect an API key or passphrase in this form —
-> the reference identifies a secret already stored in the vault. Setting a
-> different value stamps `rotatedAt`.
+> **There is no exchange field.** It was removed: where an order goes is decided
+> by the symbol, which already knows its venue. One Dhan account now trades NSE
+> and BSE as one row, and Delta stops needing a meaningless value.
 
 ```json
-{ "id": "a41b...", "exchangeId": "d0c1...", "exchangeCode": "NSE",
-  "exchangeName": "National Stock Exchange of India",
-  "accountName": "Primary", "active": true,
-  "vaultRef": "secret/brokers/dhan/acct-123", "rotatedAt": null,
+{ "id": "a41b...", "userBrokerId": "77aa...", "userBrokerLabel": "My Delta",
+  "brokerId": "b1c2...", "brokerCode": "DELTA", "brokerName": "Delta Exchange",
+  "brokerAuthType": "api_key",
+  "accountName": "main", "brokerAccountId": "42891", "active": true,
+  "credentialsConfigured": true, "credentialsOverridden": false,
   "activeStrategySubscriptions": 2,
   "createdAt": "...", "updatedAt": "..." }
 ```
 
-**409 on delete** while `activeStrategySubscriptions > 0` — offer "deactivate" instead.
+`credentialsConfigured` answers "can this account authenticate?" — true whether
+the key is its own or inherited. `credentialsOverridden` says which of the two.
+
+**An account cannot move between setups** (409), for the same reason a setup
+cannot change broker.
+
+**409 on delete** while `activeStrategySubscriptions > 0`.
 
 ---
 
-### 5.7 Reference data — read-only
+### 5.8 Broker credentials — two levels
+
+The same body and the same response shape at both levels:
+
+| Method | Path | Writes |
+|---|---|---|
+| GET · PUT · DELETE | `/api/v1/my-brokers/{id}/credentials` | the setup's key, shared by all its accounts |
+| GET · PUT · DELETE | `/api/v1/trading-accounts/{id}/credentials` | one account's **override** of it |
+
+**Which fields to render** comes from `authType`:
+
+| `authType` | Fields that matter |
+|---|---|
+| `api_key` | `apiKey`, `apiSecret`, `clientId` |
+| `oauth_redirect` | `apiKey`, `apiSecret`, `redirectUrl`, then `accessToken` daily |
+| `totp` | `apiKey`, `apiSecret`, `clientId`, `totpSecret` |
+
+```json
+PUT /api/v1/my-brokers/{id}/credentials
+{ "apiKey": "abc123", "apiSecret": "s3cr3t", "clientId": "1100112233" }
+```
+
+**PUT is partial, and that is the point.** A field left out keeps its stored
+value, so storing today's access token is one field — the caller never resends an
+API secret it is not allowed to read back:
+
+```json
+PUT { "accessToken": "eyJ...", "tokenExpiresAt": "2026-08-22T03:30:00Z" }
+```
+
+To remove a value, send an empty string: `{"totpSecret": ""}`.
+
+**Overrides resolve per field, not per row.** An account that overrides only
+`accessToken` still uses the setup's `apiKey` and `apiSecret`. Clearing the last
+overridden field deletes the override entirely and the account goes back to
+inheriting everything — same rule as the strategy parameter overrides in 5.4.
+
+> **No secret is ever returned — not even to the user who wrote it.** `GET`
+> answers what is *set*, not what it is. Render "API secret: ******** (set)" with
+> a change button; never try to prefill a secret field.
+
+```json
+{ "userBrokerId": "77aa...", "tradingAccountId": "a41b...",
+  "brokerCode": "DELTA", "authType": "api_key",
+  "apiKeyHint": "****c123", "hasApiKey": true, "hasApiSecret": true,
+  "hasAccessToken": true, "hasRefreshToken": false, "hasTotpSecret": false,
+  "redirectUrl": null, "clientId": "1100112233",
+  "tokenExpiresAt": "2026-08-22T03:30:00Z", "tokenExpired": false,
+  "overriddenFields": ["accessToken"],
+  "vaultRef": null, "rotatedAt": null, "createdAt": "...", "updatedAt": "..." }
+```
+
+`tradingAccountId` is null on a setup read, and `overriddenFields` is always
+empty there. On an account read, the `has*` flags describe the **effective**
+state and `overriddenFields` names the ones that came from the account itself —
+so `[]` means it runs entirely on the setup's key.
+
+`tokenExpired: true` is the cue to send the user back through the broker login.
+
+Secrets are stored as AES-GCM ciphertext (`SecretCipher`, key from
+`CREDENTIAL_ENCRYPTION_KEY`); `redirectUrl` and `clientId` are plaintext because
+neither is a secret. If the key is unset the server still starts, `GET` still
+reports what is set, and every write fails with a clear message.
+
+---
+
+### 5.9 Reference data — read-only
 
 | Method | Path | Notes |
 |---|---|---|
@@ -665,7 +786,7 @@ role model to gate writes with. Don't build create/edit screens.
 convention the underlying (`instrumentType` of `index` or `spot`), not an option
 contract. Default the picker to those and de-emphasize `option` rows.
 
-### 5.8 The caller's risk limits — `/api/v1/me/risk-limits`
+### 5.10 The caller's risk limits — `/api/v1/me/risk-limits`
 
 ```
 GET  /api/v1/me/risk-limits   → 200
@@ -860,11 +981,51 @@ export interface SharedStrategyConfig {
   activeSubscribers: number; createdAt: string;
 }
 
+export interface UserBroker {
+  id: string; brokerId: string; brokerCode: string; brokerName: string;
+  authType: BrokerAuthType; label: string; active: boolean;
+  credentialsConfigured: boolean;
+  tradingAccountCount: number; accountsWithOwnCredentials: number;
+  rotatedAt: string | null; createdAt: string; updatedAt: string;
+}
+
 export interface TradingAccount {
-  id: string; exchangeId: string; exchangeCode: string; exchangeName: string;
-  accountName: string; active: boolean;
-  vaultRef: string | null; rotatedAt: string | null;
+  id: string;
+  userBrokerId: string | null; userBrokerLabel: string | null;
+  brokerId: string | null; brokerCode: string | null;
+  brokerName: string | null; brokerAuthType: BrokerAuthType | null;
+  accountName: string; brokerAccountId: string | null; active: boolean;
+  /** True when it can authenticate at all - own key or inherited. */
+  credentialsConfigured: boolean;
+  /** True when the key is its own rather than the setup's. */
+  credentialsOverridden: boolean;
   activeStrategySubscriptions: number; createdAt: string; updatedAt: string;
+}
+
+export type BrokerAuthType = "api_key" | "oauth_redirect" | "totp";
+
+export interface Broker {
+  id: string; code: string; name: string;
+  description: string | null; apiBaseUrl: string | null;
+  authType: BrokerAuthType; active: boolean;
+}
+
+/** No secret is returned. Booleans say what is set; apiKeyHint is the last 4.
+ *  Read at the account level, the flags are the EFFECTIVE state. */
+export interface BrokerCredentials {
+  userBrokerId: string;
+  /** Null on a setup read; set when reading one account's view. */
+  tradingAccountId: string | null;
+  brokerCode: string | null; authType: BrokerAuthType | null;
+  apiKeyHint: string | null;
+  hasApiKey: boolean; hasApiSecret: boolean; hasAccessToken: boolean;
+  hasRefreshToken: boolean; hasTotpSecret: boolean;
+  redirectUrl: string | null; clientId: string | null;
+  tokenExpiresAt: string | null; tokenExpired: boolean;
+  /** Fields this account supplies itself. Empty = inherits everything. */
+  overriddenFields: string[];
+  vaultRef: string | null; rotatedAt: string | null;
+  createdAt: string; updatedAt: string;
 }
 
 export interface Exchange {
@@ -925,11 +1086,24 @@ export interface UserRiskLimits {
 | GET | `/api/v1/shared-strategy-configs` | shared configs (`?status`) |
 | GET | `/api/v1/shared-strategy-configs/{id}` | detail |
 | GET | `/api/v1/shared-strategy-configs/indicator-plan` | dedup report |
-| GET | `/api/v1/trading-accounts` | the caller's accounts |
+| GET | `/api/v1/my-brokers` | the caller's broker setups (`?brokerId`, `?active`) |
+| GET | `/api/v1/my-brokers/{id}` | detail |
+| POST | `/api/v1/my-brokers` | set a broker up |
+| PUT | `/api/v1/my-brokers/{id}` | rename / deactivate |
+| DELETE | `/api/v1/my-brokers/{id}` | delete (409 while accounts exist) |
+| GET | `/api/v1/my-brokers/{id}/credentials` | masked status |
+| PUT | `/api/v1/my-brokers/{id}/credentials` | store / rotate the setup key |
+| DELETE | `/api/v1/my-brokers/{id}/credentials` | remove the setup key |
+| GET | `/api/v1/trading-accounts` | the caller's accounts (`?userBrokerId`) |
 | GET | `/api/v1/trading-accounts/{id}` | detail |
 | POST | `/api/v1/trading-accounts` | create |
-| PUT | `/api/v1/trading-accounts/{id}` | update / rotate vault ref |
+| PUT | `/api/v1/trading-accounts/{id}` | rename / deactivate |
 | DELETE | `/api/v1/trading-accounts/{id}` | delete |
+| GET | `/api/v1/trading-accounts/{id}/credentials` | effective status (inherited + overrides) |
+| PUT | `/api/v1/trading-accounts/{id}/credentials` | override fields for this account |
+| DELETE | `/api/v1/trading-accounts/{id}/credentials` | drop the override, inherit again |
+| GET | `/api/v1/brokers` | reference (`?activeOnly`) |
+| GET | `/api/v1/brokers/{id}` | reference |
 | GET | `/api/v1/exchanges` | reference (`?status`) |
 | GET | `/api/v1/exchanges/{id}` | reference |
 | GET | `/api/v1/symbols` | reference (`?exchangeId`, `?activeOnly`) |
@@ -940,5 +1114,8 @@ export interface UserRiskLimits {
 | PUT | `/api/v1/me/risk-limits` | set caps (full replace) |
 
 Not part of this module and unchanged: `/api/v1/auth/**` (login, refresh,
-logout), `/api/v1/strategy/**` (the legacy platform-wide on/off switches), and
-the Dhan token endpoints.
+logout) and `/api/v1/strategy/**` (the legacy platform-wide on/off switches).
+
+**Removed:** the Dhan token endpoints (`/api/dhan/token`). They stored one
+platform-wide token that every user shared. Broker tokens are now per trading
+account, encrypted, at `PUT /api/v1/my-brokers/{id}/credentials`.

@@ -66,7 +66,6 @@ The codebase contains two distinct worlds that share a database and a JWT.
 | `JwtUtil`, `JwtFilter` | Issues and validates the access/refresh JWTs |
 | `PlatformStrategyToggle` → `platform_strategy_toggles` | Platform-wide on/off switches, keyed by an uppercased name string with no FK to `strategy_templates` |
 | `PlatformStrategyToggleController` `/api/v1/strategy-toggles` | CRUD over those switches. `PUT /{name}/toggle` is **mutually exclusive** — enabling one disables every other |
-| `DhanAccessToken`, `DhanTokenService` | Dhan broker token renewal |
 
 ### B. Control plane / strategy module (the new work)
 
@@ -86,7 +85,9 @@ The codebase contains two distinct worlds that share a database and a JWT.
 | `UserStrategy` → `user_strategies` | A user's customization of a template — FKs only, no copied master data |
 | `UserStrategyIndicator` → `user_strategy_indicators` | Which indicator usages that customization carries |
 | `UserStrategyParameter` → `user_strategy_parameters` | ONE ROW PER CHANGED VALUE; a knob left at its default has none |
-| `TradingAccount`, `AccountCredential` | Broker accounts + Vault pointer |
+| `Broker` | Who the order is routed through (DHAN, ZERODHA) — distinct from the venue |
+| `UserBroker` | One user's setup with a broker, and the key its accounts share |
+| `TradingAccount`, `BrokerCredential` | The accounts under a setup + their encrypted credentials |
 | `RiskProfile`, `UserRiskLimit` | Per-subscription and per-user caps |
 
 ### The bridge between them
@@ -150,7 +151,7 @@ Entity  ──────────────────  Postgres (Neon)
 
 Errors are mapped by `StrategyApiExceptionHandler`, a `@RestControllerAdvice`
 **scoped to the six strategy-module controllers only** (via `assignableTypes`),
-so the auth and Dhan controllers keep their own response shapes.
+so the authentication controllers keep their own response shapes.
 
 ---
 
@@ -319,13 +320,14 @@ account is one leg, so a repeat is an update, not a second row.
 
 | Entity → table | Stores |
 |---|---|
-| `TradingAccount` → `trading_accounts` | user + exchange + `accountName`, UNIQUE together. `active` flag |
-| `AccountCredential` → `account_credentials` | 1:1 with a trading account. **`vaultRef` only** — no api_key/secret columns, so a DB dump leaks nothing |
+| `UserBroker` → `user_brokers` | user + catalog broker + `label`, UNIQUE together. The parent of every account reached through it |
+| `TradingAccount` → `trading_accounts` | Belongs to a `UserBroker`; `accountName` UNIQUE within it. `brokerAccountId` is the broker's own id. **No exchange** — the symbol decides the venue |
+| `Broker` → `brokers` | `code` unique. `authType` says which credential fields that broker needs |
+| `BrokerCredential` → `broker_credentials` | Two levels: `trading_account_id` NULL is the setup's key, set is one account's override. Resolution is **per field**. Secrets are AES-GCM ciphertext via `SecretCipher` |
 | `RiskProfile` → `risk_profiles` | Reusable per-subscription caps: `maxDailyLoss`, `maxDrawdown`, `maxPositionSize`, `maxTotalExposure`, `maxTradesPerDay`, `killSwitchEnabled` |
 | `UserRiskLimit` → `user_risk_limits` | **PK is `user_id`** — one row per user. Aggregate caps: `maxDailyLoss`, `maxOpenPositions`, `maxTotalExposure`. Exists because ten subscriptions would otherwise mean ten independent daily-loss limits and no total |
 | `GoogleAuthToken` → `google_auth_tokens` | Auth only: `email`, `accessToken`, `refreshToken`, `panCard`, `revoked`, `createdAt` |
 | `StrategyConfig` → `platform_strategy_toggles` | Legacy: `strategyName` (uppercased, UNIQUE), `enabled`, `configJson`, `updatedAt` |
-| `DhanAccessToken` → `dhan_access_tokens` | `accessToken`, `dhanClientId`, `expiryTime` |
 
 ---
 
@@ -726,8 +728,12 @@ All strategy-module endpoints require `Authorization: Bearer <accessToken>`.
 | GET/POST/PUT/DELETE | `/api/v1/strategy-toggles/...` | Legacy platform switches, unrelated to templates |
 | GET/PUT/DELETE | `/api/v1/my-subscriptions/{id}` | Another user's row reports **404, not 403** |
 | GET/POST | `/api/v1/trading-accounts` | |
-| GET/PUT/DELETE | `/api/v1/trading-accounts/{id}` | |
-| GET | `/api/v1/exchanges`, `/symbols`, `/risk-profiles` | Reference data |
+| GET/POST | `/api/v1/my-brokers` | The caller's broker setups — step one |
+| GET/PUT/DELETE | `/api/v1/my-brokers/{id}` | 409 on delete while accounts hang off it |
+| GET/PUT/DELETE | `/api/v1/my-brokers/{id}/credentials` | The key every account under it inherits |
+| GET/PUT/DELETE | `/api/v1/trading-accounts/{id}` | An account cannot move between setups |
+| GET/PUT/DELETE | `/api/v1/trading-accounts/{id}/credentials` | One account's override; masked on read, PUT is partial, `""` clears a field |
+| GET | `/api/v1/exchanges`, `/brokers`, `/symbols`, `/risk-profiles` | Reference data |
 | GET/PUT | `/api/v1/me/risk-limits` | Aggregate caps |
 
 Ownership is enforced *inside the query* (`findByIdAndUser_Id`), which is why a
