@@ -84,6 +84,22 @@ public class StrategyApiExceptionHandler {
         return ResponseEntity.badRequest().body(ApiError.of(shortMessage(e)));
     }
 
+    /**
+     * The cipher could not run: no key configured, the wrong key, or a stored
+     * value in an unexpected format. 503 rather than 500 because the request
+     * itself was fine and will succeed once the server is configured - and
+     * because the catch-all below would replace the message with "Unexpected
+     * error", leaving an operator to find a missing environment variable by
+     * reading stack traces.
+     *
+     * The message names the variable, never a key or a secret.
+     */
+    @ExceptionHandler(CredentialEncryptionException.class)
+    public ResponseEntity<ApiError> handleCredentialEncryption(CredentialEncryptionException e) {
+        log.error("503 SERVICE UNAVAILABLE - credential encryption: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(ApiError.of(e.getMessage()));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiError> handleUnexpected(Exception e) {
         log.error("500 INTERNAL SERVER ERROR", e);

@@ -11,8 +11,9 @@ services:
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
       JWT_SECRET: ${JWT_SECRET}
       TOKEN_SECRET: ${TOKEN_SECRET}
-      DHAN_PARTNER_ID: ${DHAN_PARTNER_ID}
-      DHAN_PARTNER_SECRET: ${DHAN_PARTNER_SECRET}
-      DHAN_CONSENT_ID: ${DHAN_CONSENT_ID}
+  CREDENTIAL_ENCRYPTION_KEY=12345678901234567890123456789012      # Encrypts broker API credentials at rest. Without it every credential
+      # read and write fails with 503; the rest of the app still runs.
+      #   openssl rand -base64 32
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY}
     restart: always
 

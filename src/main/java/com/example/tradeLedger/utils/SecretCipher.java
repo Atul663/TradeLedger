@@ -2,6 +2,7 @@ package com.example.tradeLedger.utils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.example.tradeLedger.exception.CredentialEncryptionException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -84,7 +85,7 @@ public class SecretCipher {
             return PREFIX + Base64.getEncoder().encodeToString(packed);
         } catch (Exception e) {
             // The message never carries the plaintext or the key.
-            throw new IllegalStateException("Failed to encrypt credential", e);
+            throw new CredentialEncryptionException("Failed to encrypt credential", e);
         }
     }
 
@@ -94,7 +95,7 @@ public class SecretCipher {
         }
         requireKey();
         if (!stored.startsWith(PREFIX)) {
-            throw new IllegalStateException(
+            throw new CredentialEncryptionException(
                     "Credential is not in the expected v1 format. It was probably written before "
                             + "encryption was added, or with a different key.");
         }
@@ -109,14 +110,14 @@ public class SecretCipher {
 
             return new String(plain, java.nio.charset.StandardCharsets.UTF_8);
         } catch (Exception e) {
-            throw new IllegalStateException(
+            throw new CredentialEncryptionException(
                     "Failed to decrypt credential - wrong CREDENTIAL_ENCRYPTION_KEY, or the value was altered", e);
         }
     }
 
     private void requireKey() {
         if (key == null) {
-            throw new IllegalStateException(NO_KEY);
+            throw new CredentialEncryptionException(NO_KEY);
         }
     }
 
