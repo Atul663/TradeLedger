@@ -40,7 +40,13 @@ public class SecurityConfig {
                                 "/swagger-ui/**",
                                 "/swagger-ui.html"
                         ).permitAll()
-                        .requestMatchers("/api/v1/**").permitAll()
+                        // /error is permitted on purpose. It carries no data of its own -
+                        // it renders the status the request already earned. Boot runs this
+                        // chain on every dispatcher type and AuthorizationFilter authorizes
+                        // ERROR dispatches, so leaving /error out turns every 404 and 500
+                        // raised inside a permitted endpoint into a 401 and hides the real
+                        // failure behind an authentication one.
+                        .requestMatchers("/api/v1/**", "/error").permitAll()
                         .anyRequest().authenticated()
                 )
 
