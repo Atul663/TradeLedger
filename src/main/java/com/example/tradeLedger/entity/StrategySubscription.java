@@ -1,34 +1,40 @@
 package com.example.tradeLedger.entity;
 
 import jakarta.persistence.*;
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
 /**
- * Table {@code user_strategy_subscriptions}: the fan-out edge, and the user-to-strategy
- * relationship in this design.
+ * Table {@code user_strategy_subscriptions}: one deployment of one saved strategy
+ * onto one trading account.
  *
- * A user never owns a {@link StrategyTemplate} or a {@link SharedStrategyConfig} - those are
- * shared, content-addressed rows. What a user owns is a subscription: their
- * account, their sizing, their execution-scope knobs. Every read and write in
- * the API layer is filtered by {@code user_id} for exactly this reason.
+ * <pre>
+ *   user_strategy_subscriptions ──→ users             whose it is
+ *                               ──→ user_strategies   WHAT it runs
+ *                               ──→ trading_accounts  WHERE it runs
+ *                               ──→ risk_profiles     under which caps
+ * </pre>
  *
- * {@code UNIQUE (shared_config_id, trading_account_id)}: one config on two
- * accounts is two subscriptions and therefore two independently tracked legs,
- * with no special columns needed.
+ * <b>The configuration is not copied here.</b> A subscription reaches its
+ * instrument, strikes, ladder, exits and indicator tuning through
+ * {@code user_strategy_id}, so editing the saved strategy moves every broker it
+ * is deployed on at once - which is what "deploy it with multiple brokers" means.
+ * A frozen copy per account would drift the moment the user retuned anything and
+ * leave no way to tell the copies from the original.
  *
- * {@link #execParams} holds SL/TP/trailing - personal, and NEVER part of any
- * hash, which is what lets two users share one indicator computation while
- * exiting at different stop losses.
+ * What IS here is the only thing that genuinely differs per account: how much,
+ * under whose risk profile, and paper or live. Everything else is one row away
+ * through a foreign key.
+ *
+ * {@code UNIQUE (user_strategy_id, trading_account_id)}: a saved strategy is
+ * deployed on an account once. Deploying it twice is an edit, not a second row.
  */
 @Entity
 @Table(name = "user_strategy_subscriptions",
-        uniqueConstraints = @UniqueConstraint(name = "uq_user_strategy_subs_config_account",
-                columnNames = {"shared_config_id", "trading_account_id"}))
+        uniqueConstraints = @UniqueConstraint(name = "uq_user_strategy_subs_strategy_account",
+                columnNames = {"user_strategy_id", "trading_account_id"}))
 public class StrategySubscription {
 
     public static final String MODE_PAPER = "paper";
@@ -43,13 +49,20 @@ public class StrategySubscription {
     @Column(name = "id", nullable = false, updatable = false)
     private UUID id;
 
+    /**
+     * Kept alongside {@code userStrategy} even though that row knows its owner.
+     * Ownership filtering happens on every read ({@code findByIdAndUser_Id}) and
+     * joining through the parent to do it would turn the cheapest, most frequent
+     * check in the module into a two-table query.
+     */
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
+    /** The saved configuration this deployment runs. The whole of "what". */
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "shared_config_id", nullable = false)
-    private SharedStrategyConfig sharedConfig;
+    @JoinColumn(name = "user_strategy_id", nullable = false)
+    private UserStrategy userStrategy;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "trading_account_id", nullable = false)
@@ -59,15 +72,17 @@ public class StrategySubscription {
     @JoinColumn(name = "risk_profile_id")
     private RiskProfile riskProfile;
 
-    @Column(name = "quantity", nullable = false, precision = 20, scale = 8)
-    private BigDecimal quantity = BigDecimal.ONE;
-
-    @Column(name = "multiplier", nullable = false, precision = 20, scale = 8)
+    /**
+     * Scales the strategy's {@code baseLot} on this account: 1 runs the ladder as
+     * configured, 2 runs it at double size on this broker alone.
+     *
+     * A multiplier rather than a second quantity, so there is exactly one place a
+     * size is authored and this is a knob on top of it.
+     */
+    @Column(name = "multiplier", precision = 20, scale = 8, nullable = false)
     private BigDecimal multiplier = BigDecimal.ONE;
 
-    @Column(name = "lot_size", precision = 20, scale = 8)
-    private BigDecimal lotSize;
-
+    /** Capital earmarked on this account, for the percent-based execution modes. */
     @Column(name = "capital_allocated", precision = 20, scale = 8)
     private BigDecimal capitalAllocated;
 
@@ -75,25 +90,13 @@ public class StrategySubscription {
     @Column(name = "execution_mode", nullable = false, length = 20)
     private String executionMode = EXEC_FIXED_QTY;
 
-    /** {@code {"sl_pct":1.5,"tp_pct":3.0}} - execution scope only, never hashed. */
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "exec_params", nullable = false, columnDefinition = "jsonb")
-    private String execParams = "{}";
-
-    /** paper | live */
+    /** paper | live - decided per account, so one broker can go live before the rest. */
     @Column(name = "trade_mode", nullable = false, length = 10)
     private String tradeMode = MODE_PAPER;
 
+    /** Pause this one broker without touching the strategy or the others. */
     @Column(name = "is_active", nullable = false)
     private boolean active = true;
-
-    /**
-     * Bumped every time the subscription is repointed at a new instance.
-     * Plain data, not a JPA optimistic-lock column - the schema defines it as an
-     * ordinary int and the design uses it as configuration lineage.
-     */
-    @Column(name = "version", nullable = false)
-    private int version = 1;
 
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt;
@@ -119,8 +122,8 @@ public class StrategySubscription {
     public User getUser() { return user; }
     public void setUser(User user) { this.user = user; }
 
-    public SharedStrategyConfig getSharedConfig() { return sharedConfig; }
-    public void setSharedConfig(SharedStrategyConfig sharedConfig) { this.sharedConfig = sharedConfig; }
+    public UserStrategy getUserStrategy() { return userStrategy; }
+    public void setUserStrategy(UserStrategy userStrategy) { this.userStrategy = userStrategy; }
 
     public TradingAccount getTradingAccount() { return tradingAccount; }
     public void setTradingAccount(TradingAccount tradingAccount) { this.tradingAccount = tradingAccount; }
@@ -128,14 +131,8 @@ public class StrategySubscription {
     public RiskProfile getRiskProfile() { return riskProfile; }
     public void setRiskProfile(RiskProfile riskProfile) { this.riskProfile = riskProfile; }
 
-    public BigDecimal getQuantity() { return quantity; }
-    public void setQuantity(BigDecimal quantity) { this.quantity = quantity; }
-
     public BigDecimal getMultiplier() { return multiplier; }
     public void setMultiplier(BigDecimal multiplier) { this.multiplier = multiplier; }
-
-    public BigDecimal getLotSize() { return lotSize; }
-    public void setLotSize(BigDecimal lotSize) { this.lotSize = lotSize; }
 
     public BigDecimal getCapitalAllocated() { return capitalAllocated; }
     public void setCapitalAllocated(BigDecimal capitalAllocated) { this.capitalAllocated = capitalAllocated; }
@@ -143,17 +140,11 @@ public class StrategySubscription {
     public String getExecutionMode() { return executionMode; }
     public void setExecutionMode(String executionMode) { this.executionMode = executionMode; }
 
-    public String getExecParams() { return execParams; }
-    public void setExecParams(String execParams) { this.execParams = execParams; }
-
     public String getTradeMode() { return tradeMode; }
     public void setTradeMode(String tradeMode) { this.tradeMode = tradeMode; }
 
     public boolean isActive() { return active; }
     public void setActive(boolean active) { this.active = active; }
-
-    public int getVersion() { return version; }
-    public void setVersion(int version) { this.version = version; }
 
     public OffsetDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(OffsetDateTime createdAt) { this.createdAt = createdAt; }

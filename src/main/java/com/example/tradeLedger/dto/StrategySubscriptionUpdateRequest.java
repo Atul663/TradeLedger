@@ -1,50 +1,53 @@
 package com.example.tradeLedger.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 import java.math.BigDecimal;
-import java.util.Map;
 import java.util.UUID;
 
 /**
- * Partial update of a subscription. Every field is optional; only what is present
+ * Partial update of one deployment. Every field is optional; only what is present
  * changes.
  *
- * {@code params} is MERGED over the current effective parameters, so
- * {@code {"fast":13}} is a valid body. Signal-scope changes never mutate a
- * strategy instance - they repoint this subscription at the instance for the
- * resulting config, creating it only if nobody already runs that exact math.
- * Execution-scope changes stay local to this row.
+ * The strategy is not editable from here. Retuning the indicators, moving the
+ * strikes or changing the ladder is a change to the strategy - one PUT on
+ * {@code /api/v1/my-strategies/{id}} that every broker running it picks up at
+ * once.
  */
+@Schema(name = "StrategySubscriptionUpdateRequest",
+        description = """
+                Change how THIS account runs the strategy: its size, its risk profile, paper or \
+                live, paused or not. Every field is optional.
+
+                The strategy itself is not editable here - retuning is one PUT on \
+                /api/v1/my-strategies/{id}, which every broker running it picks up at once. \
+                There is deliberately no way to fork one broker's configuration.""")
 public class StrategySubscriptionUpdateRequest {
 
-    private Map<String, Object> params;
-
-    private BigDecimal quantity;
-
+    @Schema(description = "Scales the strategy's baseLot on this account.", example = "2")
     private BigDecimal multiplier;
 
-    private BigDecimal lotSize;
-
+    @Schema(example = "500000")
     private BigDecimal capitalAllocated;
 
+    @Schema(example = "FIXED_QTY",
+            allowableValues = {"FIXED_QTY", "CAPITAL_PERCENT", "RISK_PERCENT"})
     private String executionMode;
 
+    @Schema(description = "One broker can go live while the rest stay on paper.",
+            example = "live", allowableValues = {"paper", "live"})
     private String tradeMode;
 
+    @Schema(example = "4f5e6d7c-8b9a-4c1d-9e2f-3a4b5c6d7e8f")
     private UUID riskProfileId;
 
+    @Schema(description = "Pause this broker without touching the strategy or the other "
+            + "deployments. The shared computation is retired once its last active "
+            + "deployment pauses, and revived when one resumes.", example = "false")
     private Boolean active;
-
-    public Map<String, Object> getParams() { return params; }
-    public void setParams(Map<String, Object> params) { this.params = params; }
-
-    public BigDecimal getQuantity() { return quantity; }
-    public void setQuantity(BigDecimal quantity) { this.quantity = quantity; }
 
     public BigDecimal getMultiplier() { return multiplier; }
     public void setMultiplier(BigDecimal multiplier) { this.multiplier = multiplier; }
-
-    public BigDecimal getLotSize() { return lotSize; }
-    public void setLotSize(BigDecimal lotSize) { this.lotSize = lotSize; }
 
     public BigDecimal getCapitalAllocated() { return capitalAllocated; }
     public void setCapitalAllocated(BigDecimal capitalAllocated) { this.capitalAllocated = capitalAllocated; }

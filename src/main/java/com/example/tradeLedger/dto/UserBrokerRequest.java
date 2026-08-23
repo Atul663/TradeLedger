@@ -1,29 +1,28 @@
 package com.example.tradeLedger.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 import java.util.UUID;
 
 /**
- * Create / update body for {@code user_brokers} - a user's setup with one broker.
- *
- * This is step one: set the broker up, then create accounts under it. The API key
- * is a separate call to {@code PUT /api/v1/my-brokers/{id}/credentials}, so a
- * secret is never a field on a body that also does renames.
+ * One user's setup with a broker - the parent of every account reached through it.
  */
+@Schema(name = "UserBrokerRequest",
+        description = "Your own setup with a catalog broker. Prefer POST /api/v1/my-brokers/setup, "
+                + "which creates the setup, its first account and its key in one transaction.")
 public class UserBrokerRequest {
 
-    /** Required on create. */
+    @Schema(description = "The catalog broker. Send this or brokerCode.",
+            example = "b1000000-1111-4222-8333-444444444444")
     private UUID brokerId;
 
-    /** Alternative to brokerId - brokers.code is unique, e.g. DELTA. */
+    @Schema(description = "Alternative to brokerId - brokers.code is unique.", example = "DHAN")
     private String brokerCode;
 
-    /**
-     * The user's own name for this setup. Defaults to the broker's name, so the
-     * common case of one setup per broker needs no label at all. Two logins with
-     * the same broker need two distinct labels.
-     */
+    @Schema(description = "Your own name for this setup. Unique per user.", example = "My Dhan")
     private String label;
 
+    @Schema(example = "true", defaultValue = "true")
     private Boolean active;
 
     public UUID getBrokerId() { return brokerId; }

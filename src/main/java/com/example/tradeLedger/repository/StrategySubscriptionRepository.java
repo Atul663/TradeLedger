@@ -14,15 +14,29 @@ public interface StrategySubscriptionRepository extends JpaRepository<StrategySu
     /** Ownership-scoped read: a subscription is never reachable across users. */
     Optional<StrategySubscription> findByIdAndUser_Id(UUID id, UUID userId);
 
-    /** UNIQUE (shared_config_id, trading_account_id) - the per-leg guarantee. */
-    Optional<StrategySubscription> findBySharedConfig_IdAndTradingAccount_Id(UUID sharedConfigId, UUID tradingAccountId);
+    /** Every broker one saved strategy is deployed on. */
+    List<StrategySubscription> findByUserStrategy_IdOrderByCreatedAtAsc(UUID userStrategyId);
+
+    /** UNIQUE (user_strategy_id, trading_account_id) - one deployment per account. */
+    Optional<StrategySubscription> findByUserStrategy_IdAndTradingAccount_Id(
+            UUID userStrategyId, UUID tradingAccountId);
 
     List<StrategySubscription> findByActiveTrue();
 
-    /** Refcount driving instance retirement. */
-    long countBySharedConfig_IdAndActiveTrue(UUID sharedConfigId);
+    /**
+     * Refcount driving shared-config retirement.
+     *
+     * Reached through {@code user_strategies} rather than a second FK on this row:
+     * the config a deployment runs is a property of the strategy, and storing the
+     * pointer twice is how the two copies start to disagree.
+     */
+    long countByUserStrategy_SharedConfig_IdAndActiveTrue(UUID sharedConfigId);
 
-    long countBySharedConfig_Id(UUID sharedConfigId);
+    long countByUserStrategy_SharedConfig_Id(UUID sharedConfigId);
+
+    long countByUserStrategy_IdAndActiveTrue(UUID userStrategyId);
+
+    long countByUserStrategy_Id(UUID userStrategyId);
 
     long countByTradingAccount_IdAndActiveTrue(UUID tradingAccountId);
 

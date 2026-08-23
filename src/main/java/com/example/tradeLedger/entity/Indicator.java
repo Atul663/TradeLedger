@@ -5,37 +5,55 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import java.time.OffsetDateTime;
+import java.util.Set;
 import java.util.UUID;
 
 /**
- * Table {@code indicators}: a compute primitive (EMA, RSI, ...).
+ * Table {@code indicators}: a compute primitive (EMA, RSI, ...) and the SHAPE of
+ * its knobs.
  *
- * <b>Indicator parameters live here as a JSON schema, not as a separate table.</b>
- * The design is explicit about this (§4.8, and gap #7 "EAV dropped"): an
- * indicator declares the SHAPE of its knobs in {@link #paramSchema} -
+ * <b>The only pluggable thing on the platform, and therefore the only thing with
+ * a dynamic schema.</b> An indicator declares what it takes in
+ * {@link #paramSchema} -
  *
- * <pre>{"period":{"type":"int","min":2,"max":300}}</pre>
+ * <pre>{"k":{"type":"int","min":1,"max":300,"default":21},
+ * "d":{"type":"int","min":1,"max":300,"default":9}}</pre>
  *
- * - while the concrete VALUES arrive through two other places, never through a
- * per-indicator parameter row:
- * <ul>
- *   <li>{@link StrategyParamDefinition} - the strategy-level knob a user actually sets
- *       ({@code fast}, {@code slow}), with its own validation rules</li>
- *   <li>the {@code $key} bindings inside {@link StrategyTemplate#getRuleTree()}, which map
- *       those knobs onto this indicator's parameters
- *       ({@code {"ind":"EMA","params":{"period":"$fast"}}})</li>
- * </ul>
+ * - and a user's concrete values live in {@code user_strategy_indicators.params}
+ * as jsonb, validated against this schema on every write. Two tables, one FK
+ * between them, no parameter catalog and no link tables: the schema IS the
+ * catalog.
  *
- * That indirection is what lets one strategy use one indicator at several
- * parameterizations, and lets EMA(9) be shared across strategies.
+ * {@code default} is what applies when a user leaves a knob alone, which is how
+ * retuning a platform default here moves every user who never set it and nobody
+ * who did.
  *
- * Note the schema gives this table no {@code updated_at} column: it is a
- * catalog of primitives, deactivated via {@link #active} rather than deleted
- * once anything references it.
+ * A rule tree's {@code $key} bindings name keys in this schema, which is what
+ * lets one template use one indicator at several parameterizations and lets
+ * EMA(9) be shared across strategies.
+ *
+ * No {@code updated_at}: it is a catalog of primitives, deactivated via
+ * {@link #active} rather than deleted once anything references it.
  */
 @Entity
 @Table(name = "indicators")
 public class Indicator {
+
+    /**
+     * The legal {@code type} values inside {@link #paramSchema}.
+     *
+     * They live here because this is the only table left that declares a type at
+     * all - every other value on the platform is a typed column, and its type is
+     * the column's.
+     */
+    public static final String TYPE_INT = "int";
+    public static final String TYPE_DECIMAL = "decimal";
+    public static final String TYPE_BOOL = "bool";
+    public static final String TYPE_ENUM = "enum";
+    public static final String TYPE_TEXT = "text";
+
+    public static final Set<String> TYPES =
+            Set.of(TYPE_INT, TYPE_DECIMAL, TYPE_BOOL, TYPE_ENUM, TYPE_TEXT);
 
     @Id
     @GeneratedValue

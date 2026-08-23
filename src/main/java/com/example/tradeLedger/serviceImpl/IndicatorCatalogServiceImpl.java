@@ -10,6 +10,7 @@ import com.example.tradeLedger.exception.StrategyValidationException;
 import com.example.tradeLedger.indicator.IndicatorResolver;
 import com.example.tradeLedger.repository.IndicatorRepository;
 import com.example.tradeLedger.repository.StrategyTemplateRepository;
+import com.example.tradeLedger.repository.UserStrategyIndicatorRepository;
 import com.example.tradeLedger.service.IndicatorCatalogService;
 import com.example.tradeLedger.utils.JsonSupport;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -31,15 +32,18 @@ public class IndicatorCatalogServiceImpl implements IndicatorCatalogService {
 
     private final IndicatorRepository indicatorRepository;
     private final StrategyTemplateRepository strategyRepository;
+    private final UserStrategyIndicatorRepository userStrategyIndicatorRepository;
     private final StrategyTemplateValidator validator;
     private final JsonSupport json;
 
     public IndicatorCatalogServiceImpl(IndicatorRepository indicatorRepository,
                                           StrategyTemplateRepository strategyRepository,
+                                          UserStrategyIndicatorRepository userStrategyIndicatorRepository,
                                           StrategyTemplateValidator validator,
                                           JsonSupport json) {
         this.indicatorRepository = indicatorRepository;
         this.strategyRepository = strategyRepository;
+        this.userStrategyIndicatorRepository = userStrategyIndicatorRepository;
         this.validator = validator;
         this.json = json;
     }
@@ -170,6 +174,15 @@ public class IndicatorCatalogServiceImpl implements IndicatorCatalogService {
                     + "' is referenced by the rule tree of " + users
                     + " and cannot be deleted. Deactivate it instead (PUT /api/v1/indicators/"
                     + id + " with \"active\": false).");
+        }
+        // user_strategy_indicators holds a real FK to this row, so a tuned usage
+        // would make the delete a constraint violation. Refusing it here is the
+        // same answer, said in a sentence the caller can act on.
+        long tunings = userStrategyIndicatorRepository.countByIndicator_Id(id);
+        if (tunings > 0) {
+            throw new ResourceConflictException("Indicator '" + def.getName() + "' is tuned by "
+                    + tunings + " user strategy(ies) and cannot be deleted. "
+                    + "Deactivate it instead (PUT /api/v1/indicators/" + id + " with \"active\": false).");
         }
         indicatorRepository.delete(def);
         log.info("DELETE indicator '{}' id={}", def.getName(), id);

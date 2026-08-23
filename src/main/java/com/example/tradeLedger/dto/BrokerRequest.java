@@ -1,45 +1,35 @@
 package com.example.tradeLedger.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 /**
- * Create / update body for the {@code brokers} catalog.
- *
- * This is platform master data, not one user's data: every {@code user_brokers}
- * row points at one of these, so a change here is visible to everybody.
- *
- * <pre>
- * { "code": "DELTA",
- *   "name": "Delta Exchange",
- *   "description": "Delta India: broker and venue in one",
- *   "apiBaseUrl": "https://api.india.delta.exchange",
- *   "authType": "api_key" }
- * </pre>
- *
- * {@code authType} is what a credential form switches on, so getting it right
- * matters more than it looks - it decides which fields the UI asks for:
- * <ul>
- *   <li>{@code api_key} - key + secret, no browser step</li>
- *   <li>{@code oauth_redirect} - key + secret + redirect URL, exchanged for a
- *       daily access token</li>
- *   <li>{@code totp} - key + secret + client id + TOTP seed</li>
- * </ul>
+ * The broker catalog - shared master data, not per-user.
  */
+@Schema(name = "BrokerRequest",
+        description = "A broker in the platform catalog. SHARED master data, not per-user: "
+                + "a user's own setup with a broker is /api/v1/my-brokers. authType decides "
+                + "which credential fields that broker needs.")
 public class BrokerRequest {
 
-    /**
-     * Stable handle the adapters switch on. Uppercased on the way in, so
-     * {@code delta} and {@code DELTA} are the same broker rather than two.
-     */
+    @Schema(description = "Unique business key, uppercase by convention.", example = "DHAN", maxLength = 30)
     private String code;
 
+    @Schema(example = "Dhan", maxLength = 100)
     private String name;
 
+    @Schema(example = "Dhan HQ trading API")
     private String description;
 
+    @Schema(example = "https://api.dhan.co")
     private String apiBaseUrl;
 
-    /** api_key | oauth_redirect | totp. Defaults to api_key. */
+    @Schema(description = "Decides which credential fields a setup for this broker needs.",
+            example = "api_key",
+            allowableValues = {"api_key", "oauth_redirect", "totp"},
+            defaultValue = "api_key")
     private String authType;
 
+    @Schema(example = "true", defaultValue = "true")
     private Boolean active;
 
     public String getCode() { return code; }

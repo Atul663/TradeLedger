@@ -1,66 +1,59 @@
 # Strategy Builder — UI Integration Guide
 
-Everything the frontend needs to implement the strategy builder module: endpoints,
-request payloads, response payloads, status codes, enumerations, dynamic form
-rules and screen flows.
+Everything the frontend needs: endpoints, payloads, status codes, enumerations
+and screen flows.
 
-**Source of truth.** Field names below are the actual serialized JSON produced by
-the implementation, verified against the running Jackson configuration — not a
-sketch. Backend design rationale lives in [`strategy-module-api.md`](./strategy-module-api.md);
-this document is the client contract.
-
-> **Note on the reference file.** No previous frontend markdown was found at the
-> path supplied (`Downloads/trading-platform-database-design.md` is the database
-> design document). This guide was written from scratch against the implemented
-> API. If a frontend doc turns up, point me at it and I'll merge instead.
+**Source of truth.** Field names below are the serialized JSON the implementation
+produces. Design rationale lives in [`architecture.md`](./architecture.md); this
+document is the client contract.
 
 ---
 
 ## 1. The mental model (read this first)
 
-The builder has **two distinct jobs**, and conflating them is the most common way
-to get this UI wrong.
-
-**A. Authoring a strategy** — a *template*: a rule tree over indicators plus the
-list of knobs users may tune. Platform-level, not owned by anyone. Seeded
-strategies are locked (`system: true`).
-
-**B. Subscribing to a strategy** — a *user's configuration*: pick a strategy, a
-symbol, a timeframe, fill in the knobs, choose a trading account. This is what a
-user owns and what they see on a dashboard.
-
-Between A and B sits a shared object the UI should **display but never create**:
+Three objects, and the UI touches two of them.
 
 ```
-Strategy (template)         →  "EMA Crossover", rule tree, knob definitions
-   └─ SharedStrategyConfig      →  EMA Crossover + NIFTY + 5m + {fast:9, slow:21}
-        └─ StrategySubscription     →  ...on MY account, with MY stop loss, paper mode
+  strategy_templates       the LOGIC          platform-owned. Browse, never edit.
+        │
+        ▼
+  user_strategies          the CONFIG         ← the builder screen lives here
+        │                                       one row, everything in it
+        ├──────────┬──────────┐
+        ▼          ▼          ▼
+   subscription  subscription  subscription    ← the deployments screen
+     Dhan main    Dhan hedge    Zerodha          who runs it, at what size
 ```
 
-A `SharedStrategyConfig` is **immutable and shared**. Two users who pick identical
-signal parameters land on the *same* instance row and the same `configHash` —
-that is deliberate, it is how the platform computes EMA(9) once instead of twice.
-Instances appear automatically when someone subscribes. There is no create
-endpoint for them.
+**A strategy holds its whole configuration.** Symbol, candle, future-or-options,
+the CE and PE strikes, the averaging ladder, the stop — all of it on one row, all
+of it in one PUT. There is no separate "parameters" call and no key/value map to
+assemble.
 
-The consequence that shows up in the UI: **editing a subscription's signal
-parameters does not edit anything shared.** It silently repoints the subscription
-at a different instance, bumps `version`, and changes `configHash`. The
-subscription `id` never changes. Show the user their subscription, not the
-instance.
+**A deployment holds none of it.** It points at the strategy. So:
 
-### Which parameters are shared vs private
+> Editing a strategy changes **every broker it is deployed on**, immediately.
 
-Every knob carries a `scope`:
+Say that in the UI. It is the behaviour users want ("I changed my strategy") but
+it will surprise anyone expecting a per-broker copy. There is no per-broker
+override of the configuration — only of size, risk profile and paper/live.
 
-| `scope` | Lives on | Hashed | Shown as |
-|---|---|---|---|
-| `signal` | the shared instance | yes | "Strategy settings" — changing these changes which instance you share |
-| `execution` | your subscription | **no** | "Your execution settings" — private, e.g. stop loss / take profit |
+**The dedup is invisible but worth surfacing.** Two users with the same indicator
+values on the same symbol and candle share one computation, whatever else differs.
+`configHash` and `sharedConfigId` are how you show it.
 
-Two users can run identical 9×21 math with different stop losses and still share
-one computation. Group the form by `scope` and label it; users otherwise
-misunderstand why their SL change didn't create a "new" strategy.
+### What is fixed and what is per-template
+
+| | Where it comes from | Changes per template? |
+|---|---|---|
+| Symbol, candle, trigger duration | fixed columns | no |
+| FUT/OPTION, CE & PE strikes | fixed columns | no |
+| Lot rule, base lot, averaging count | fixed columns | no |
+| SL %, TP % | fixed columns | no |
+| **Indicator values (k, d, period…)** | `indicators[].paramSchema` | **yes** |
+
+So the builder form is built **once** by hand for everything except the indicator
+block, which is generated from each indicator's `paramSchema`.
 
 ---
 
@@ -69,1149 +62,402 @@ misunderstand why their SL change didn't create a "new" strategy.
 | | |
 |---|---|
 | Base path | `/api/v1` |
-| Content type | `application/json` (request and response) |
+| Content type | `application/json` |
 | Auth | `Authorization: Bearer <access token>` — the existing token, unchanged |
-| CORS | Credentials allowed; origins include `http://localhost:*`, `http://127.0.0.1:*`, `https://prowfin.proweltconsulting.com`, `https://trade-pnl-analysis.vercel.app` |
+| CORS | Credentials allowed; `http://localhost:*`, `http://127.0.0.1:*`, `https://prowfin.proweltconsulting.com`, `https://trade-pnl-analysis.vercel.app` |
 | OpenAPI | `/v3/api-docs`, Swagger UI at `/swagger-ui.html` |
 
-Authentication is untouched by this module — keep using the current login,
-refresh and logout flow. The first time an authenticated user touches any
-endpoint here, their control-plane profile is provisioned automatically. No
-signup call, no extra step.
-
-### Serialization conventions
-
-| Type | JSON | Example |
-|---|---|---|
-| id | string (UUID v4) | `"9f1c2b4e-..."` — except strategy parameter ids, which are **integers** |
-| timestamp | ISO-8601 with offset | `"2026-08-13T15:58:49.123+05:30"` |
-| money / quantity | unquoted number, up to 8 decimals | `5000.00000000` |
-| absent value | `null` (key is present) | `"maxTotalExposure": null` |
-| JSON columns | nested object, never a string | `"ruleTree": { ... }` |
-
-> **Precision warning.** `quantity`, `multiplier`, `lotSize`, `capitalAllocated`
-> and every risk limit are `numeric(20,8)` server-side and arrive as JSON
-> numbers. `JSON.parse` turns them into IEEE-754 doubles. Don't do arithmetic on
-> them for display of exact values — render from the raw string, or parse with a
-> decimal library, if you ever show sums.
+The first time an authenticated user touches any endpoint here, their
+control-plane profile is provisioned automatically. No signup call.
 
 ### Status codes
 
 | Code | When |
 |---|---|
-| `200` | successful GET / PUT |
+| `200` | successful GET / PUT — **and a partially-failed deploy** |
 | `201` | successful POST (body = the created resource) |
-| `204` | successful DELETE (**no body**) |
+| `204` | successful DELETE (no body) |
 | `400` | validation failure — see `errors[]` |
 | `401` | missing / invalid / expired token |
 | `404` | not found, **or owned by another user** |
 | `409` | conflict: duplicate, locked system row, or blocked by references |
-| `500` | unexpected |
 
-There is no `403`. A resource belonging to another user reports `404` by design —
-the ownership filter is part of the query, so the API never reveals that someone
-else's row exists.
+There is no `403`. A resource belonging to another user reports `404` by design.
 
 ### Error body
 
 ```json
-{ "error": "Parameter 'slow' must be greater than 'fast' (9 vs 21)",
+{ "error": "ceStrikeOffset must be 1..15 for OTM, got 16",
   "errors": [
-    "Parameter 'slow' must be greater than 'fast' (9 vs 21)",
-    "Parameter 'fast' must be >= 2, got 1"
+    "ceStrikeOffset must be 1..15 for OTM, got 16",
+    "averagingCount must be 0..10, got 25"
   ] }
 ```
 
-`error` is always present and is a displayable sentence. `errors` is present
-**only for validation failures (400)** and holds every problem found — render the
-whole list, not just the first. `401`, `404`, `409` and `500` return `error` alone.
-
-Suggested handling: `400` → inline field errors (match on the quoted
-`'parameterKey'`); `409` → a modal explaining the conflict, since the message
-usually tells the user exactly what to do instead; `401` → refresh token, retry
-once, then log out.
+`error` is always present and displayable. `errors` appears **only on 400** and
+holds every problem found — render the whole list. Field names in the messages
+match the request field names, so matching on them to place an inline error works.
 
 ---
 
 ## 3. Enumerations
 
-Hardcode these in the UI; they are CHECK constraints in the database.
+Hardcode these. They are Java enums and database CHECK constraints.
 
 ```ts
-type DataType      = 'int' | 'decimal' | 'bool' | 'enum' | 'timeframe' | 'text';
-type ParamScope    = 'signal' | 'execution';
+type Derivative    = 'FUT' | 'OPTION';
+type Moneyness     = 'ATM' | 'ITM' | 'OTM';
+type LotRule       = 'FIXED' | 'DOUBLE' | 'CUMULATIVE';
 type TradeMode     = 'paper' | 'live';
 type ExecutionMode = 'FIXED_QTY' | 'CAPITAL_PERCENT' | 'RISK_PERCENT';
 type InstanceStatus= 'active' | 'retired';
 type InstrumentType= 'spot' | 'future' | 'option' | 'index';
-type OptionType    = 'CALL' | 'PUT';
-type ExchangeStatus= 'active' | 'disabled';
+type ParamType     = 'int' | 'decimal' | 'bool' | 'enum' | 'text';
+
+const STRIKE_OFFSETS = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15];   // ITM and OTM
 ```
 
-**Timeframe** is validated against `^[0-9]{1,4}[smhdw]$` after lowercasing.
-Offer a select rather than a free-text field:
+Enums are parsed case-insensitively, so `"otm"` is accepted — but send the
+canonical form.
+
+**Durations** are validated against `^[0-9]{1,4}[smhdw]$` after lowercasing. Offer
+a select:
 
 ```
 30s · 1m · 3m · 5m · 15m · 30m · 1h · 2h · 4h · 1d · 1w
 ```
 
+### The strike selector
+
+Moneyness and depth are one control, not two:
+
+```
+  ( ) ATM                       → { moneyness: 'ATM' }              (no depth)
+  ( ) ITM  [ 1 ▾ ]              → { moneyness: 'ITM', offset: 1..15 }
+  (•) OTM  [ 3 ▾ ]              → { moneyness: 'OTM', offset: 1..15 }
+```
+
+Disable the depth dropdown when ATM is selected — the API rejects a non-zero
+depth on ATM rather than ignoring it, because "OTM0" is not another way of
+spelling ATM.
+
 ---
 
 ## 4. Screen flows
 
-### 4.1 Browse strategies
+### 4.1 Browse templates
 
 ```
 GET /api/v1/strategy-templates?active=true
 ```
 
-One call returns everything needed to render cards *and* the configuration form —
-each item already includes `params[]`, `ruleTree` and `indicators[]`, so there is
-no follow-up request per card.
+Each item carries its `indicators[]` with `paramSchema`, so the builder form can
+be rendered with no follow-up call.
 
-Badges to render per item:
-- `system: true` → "Built-in" chip, and **disable edit/delete** (the API returns 409).
-- `active: false` → "Inactive"; cannot be subscribed to.
-- `unknownIndicators` non-empty → warning: the rule tree references an indicator
-  that doesn't exist or is disabled. Subscribing will fail.
-- `instanceCount > 0` → delete is blocked; offer "Deactivate" instead.
+Badges: `system: true` → "Built-in", disable edit/delete. `active: false` →
+"Inactive", cannot be built on. `unknownIndicators` non-empty → the rule tree
+references a missing or disabled indicator; **block the build**, it will fail.
 
-### 4.2 Subscribe (the main builder flow)
+### 4.2 Build a strategy (the main flow)
 
 ```
-1. GET /api/v1/strategy-templates/{id}          → knob definitions + rule tree
-2. GET /api/v1/symbols?activeOnly=true  → signal symbol picker
-3. GET /api/v1/trading-accounts         → the user's accounts (required)
-4. GET /api/v1/risk-profiles            → optional
-5. POST /api/v1/my-subscriptions           → 201
+1. GET  /api/v1/strategy-templates/{id}   → indicators + their paramSchema
+2. GET  /api/v1/symbols?activeOnly=true   → underlying picker
+3. POST /api/v1/my-strategies             → 201
 ```
 
-Steps 2–4 can run in parallel with 1.
+Steps 1 and 2 run in parallel. **A strategy needs no trading account** — that is
+the deploy step, which keeps the builder unblocked for a user who has not set a
+broker up yet.
 
-**A subscription requires a trading account.** If `GET /trading-accounts` returns
-`[]`, route the user to **broker setup first**. One call does the whole wizard:
-`POST /api/v1/my-brokers/setup` creates the setup, its first account and its API
-key in a single transaction. Do not let them fill the subscription form and fail
-at submit.
+A body naming only the template is valid and saves a strategy on platform
+defaults. Add the market and it becomes deployable.
 
-Render the form from `params[]` (see §6). Submit *all* knob values flat in
-`params`, both scopes together; the server splits them by `scope`.
-
-After `201`, surface `indicators[]` and `configHash` — "this configuration needs
-EMA(period=9), EMA(period=21)" is the feature that makes dedup legible to users.
-
-### 4.3 Edit a subscription
+### 4.3 Deploy to brokers
 
 ```
-PUT /api/v1/my-subscriptions/{id}
-{ "params": { "fast": 13 } }
+1. GET  /api/v1/my-brokers                        → the setups
+2. GET  /api/v1/trading-accounts                  → the accounts under them
+3. POST /api/v1/my-strategies/{id}/deploy         → 200 with per-target results
 ```
 
-`params` is **merged** over the current effective configuration, so send only what
-changed. Everything else in the body is a partial update too.
+If `GET /trading-accounts` returns `[]`, route to broker setup:
+`POST /api/v1/my-brokers/setup` does the whole wizard in one transaction.
 
-Watch for these in the response: `configHash` and `sharedConfigId` change and
-`version` increments when a *signal* parameter changed; they stay put when only
-*execution* parameters changed. Nothing changes for the user either way — don't
-show a scary "your strategy was recreated" message.
-
-Pause / resume without losing configuration:
+### 4.4 Retune
 
 ```
-PUT /api/v1/my-subscriptions/{id}   { "active": false }
+PUT /api/v1/my-strategies/{id}
+{ "indicators": [ {"indicatorName":"EMA AVERAGING", "params": {"k": 50}} ] }
 ```
 
-### 4.4 Author a new strategy
+Only what changed. Warn the user that every deployment follows.
 
-```
-1. GET /api/v1/indicators?active=true   → available primitives + paramSchema
-2. build the rule tree in the canvas     (grammar in §7)
-3. POST /api/v1/strategy-templates               → 201, is always system:false
-```
-
-Send `ruleTree` and `params[]` together on create — the server cross-validates
-them and rejects a tree that binds `$fast` when no `fast` parameter exists.
-
-Validation errors here are structural and readable; render them as a list next to
-the canvas:
-
-```
-"ruleTree references unknown indicator 'EMAA'"
-"Indicator 'EMA' has no parameter 'length' - its schema declares [period]"
-"ruleTree binds $fast but the strategy defines no parameter 'fast'"
-```
+Watch `configHash` in the response: when it changes, the strategy moved to a
+different shared computation. Nothing broke — do not show a scary message.
 
 ---
 
 ## 5. Endpoint reference
 
-### 5.1 Strategies — `/api/v1/strategy-templates`
-
-#### `GET /api/v1/strategy-templates`
-
-Query: `active` (boolean, optional), `search` (string, optional — case-insensitive
-name fragment). Returns `StrategyDetail[]`.
-
-#### `GET /api/v1/strategy-templates/{id}` → `StrategyDetail` · 404
-
-#### `GET /api/v1/strategy-templates/by-name/{name}` → `StrategyDetail` · 404
-
-Names contain spaces — URL-encode: `/by-name/EMA%20Crossover`.
-
-**`StrategyDetail`**
+### 5.1 `GET /api/v1/strategy-templates`
 
 ```json
-{
-  "id": "00000000-0000-0000-0000-00000000e0a1",
-  "name": "EMA Crossover",
-  "version": 1,
-  "description": "Long when fast EMA crosses above slow EMA; exit on reverse cross or SL/TP.",
-  "system": true,
-  "active": true,
-  "ruleTree": {
-    "entry": { "cross_above": [ { "ind": "EMA", "params": { "period": "$fast" } },
-                                { "ind": "EMA", "params": { "period": "$slow" } } ] },
-    "exit":  { "cross_below": [ { "ind": "EMA", "params": { "period": "$fast" } },
-                                { "ind": "EMA", "params": { "period": "$slow" } } ] }
-  },
-  "indicators": ["EMA"],
+[ {
+  "id": "9f1c…", "name": "EMA Averaging", "version": 1,
+  "description": "EMA of the highs against a shorter signal leg…",
+  "system": true, "active": true,
+  "ruleTree": { "entry": { "ind": "EMA AVERAGING", "params": {"k":"$k","d":"$d"} } },
+  "indicators": [ {
+      "id": "b2e4…", "name": "EMA AVERAGING", "active": true,
+      "paramSchema": {
+        "k": {"type":"int","min":1,"max":300,"default":21},
+        "d": {"type":"int","min":1,"max":300,"default":9,"lt":"k"}
+      } } ],
   "unknownIndicators": [],
-  "params": [
-    { "id": 1, "parameterKey": "fast", "dataType": "int", "scope": "signal",
-      "defaultValue": "9", "validation": { "min": 2, "max": 200 },
-      "displayLabel": "Fast EMA period", "displayOrder": 1, "required": true },
-    { "id": 2, "parameterKey": "slow", "dataType": "int", "scope": "signal",
-      "defaultValue": "21", "validation": { "min": 3, "max": 300, "gt": "fast" },
-      "displayLabel": "Slow EMA period", "displayOrder": 2, "required": true },
-    { "id": 3, "parameterKey": "sl_pct", "dataType": "decimal", "scope": "execution",
-      "defaultValue": "1.5", "validation": { "min": 0.1, "max": 20 },
-      "displayLabel": "Stop loss %", "displayOrder": 3, "required": true },
-    { "id": 4, "parameterKey": "tp_pct", "dataType": "decimal", "scope": "execution",
-      "defaultValue": "3.0", "validation": { "min": 0.1, "max": 50 },
-      "displayLabel": "Take profit %", "displayOrder": 4, "required": true }
-  ],
-  "instanceCount": 3,
-  "createdAt": "2026-08-13T15:58:49.123+05:30",
-  "updatedAt": "2026-08-13T15:58:49.123+05:30"
-}
+  "instanceCount": 4, "strategyCount": 12,
+  "createdAt": "2026-08-23T15:58:49.123+05:30", "updatedAt": "…"
+} ]
 ```
 
-| Field | Notes |
-|---|---|
-| `system` | `true` = built-in. Edit/delete return **409**. Disable the buttons. |
-| `indicators` | indicator names the rule tree resolves successfully |
-| `unknownIndicators` | referenced but missing or inactive — show a warning |
-| `params[].id` | **integer**, not a UUID |
-| `params[].defaultValue` | **always a string**, even for `int` / `decimal` — coerce before use |
-| `params[].validation` | always an object; `{}` when no rules |
-| `instanceCount` | > 0 means delete is blocked |
+#### Rendering an indicator input from `paramSchema`
 
-#### `POST /api/v1/strategy-templates` → **201** · 400 · 409
+| Key | Meaning | Use it for |
+|---|---|---|
+| `type` | `int` \| `decimal` \| `bool` \| `enum` \| `text` | which control |
+| `default` | **always present** | the initial value |
+| `min` / `max` | numeric bounds | input bounds, client-side check |
+| `options` | non-empty list (required for `enum`) | a select |
+| `gt` / `lt` | names another key of the same indicator | a cross-field check: `d` must stay under `k` |
+
+Implement `gt`/`lt` client-side too — the server enforces it, but catching it in
+the form is a better experience than a round trip.
+
+### 5.2 `POST /api/v1/my-strategies` · `PUT /api/v1/my-strategies/{id}`
+
+One shape for both. **Present is applied, absent is left alone** — which on create
+means the column default.
 
 ```json
 {
-  "name": "RSI Reversal",
-  "description": "Long when RSI leaves oversold.",
-  "version": 1,
-  "active": true,
-  "ruleTree": { "entry": { "cross_above": [ { "ind": "RSI", "params": { "period": "$rsiLen" } },
-                                            { "const": "$oversold" } ] } },
-  "params": [
-    { "parameterKey": "rsiLen", "dataType": "int", "scope": "signal",
-      "defaultValue": "14", "validation": { "min": 2, "max": 100 },
-      "displayLabel": "RSI length", "displayOrder": 1, "required": true },
-    { "parameterKey": "oversold", "dataType": "int", "scope": "signal",
-      "defaultValue": "30", "validation": { "min": 1, "max": 50 },
-      "displayLabel": "Oversold level", "displayOrder": 2, "required": true },
-    { "parameterKey": "sl_pct", "dataType": "decimal", "scope": "execution",
-      "defaultValue": "1.5", "validation": { "min": 0.1, "max": 20 },
-      "displayLabel": "Stop loss %", "displayOrder": 3, "required": true }
+  "strategyName": "EMA Averaging",
+  "name": "NIFTY 21/9 both sides",
+  "description": "…",
+
+  "symbol": "NIFTY", "exchangeCode": "NSE",
+  "candleDuration": "5m",
+  "triggerDuration": "5m",
+
+  "derivative": "OPTION",
+  "ceEnabled": true, "ceMoneyness": "OTM", "ceStrikeOffset": 1,
+  "peEnabled": true, "peMoneyness": "ATM",
+
+  "lotRule": "DOUBLE", "baseLot": 65, "averagingCount": 2,
+  "slPct": 1.5, "tpPct": 3.0,
+
+  "indicators": [
+    { "indicatorName": "EMA AVERAGING", "params": { "k": 21, "d": 9 } }
   ]
 }
 ```
 
-Required: `name` (≤100, unique), `ruleTree` (non-empty object).
-Optional: `description`, `version` (default 1, ≥1), `active` (default `true`),
-`params` (may be added later via the params endpoints).
-
-`system` is **not settable** — API-created strategies are always `system: false`.
-
-`409` when the name is taken.
-
-#### `PUT /api/v1/strategy-templates/{id}` → 200 · 400 · 404 · 409
-
-**Partial**: omitted fields are left unchanged — except `params`, which
-**replaces the entire knob set** when present. Omit `params` to leave knobs alone;
-send `[]` to delete them all.
-
-Renaming to a taken name → 409. Editing a `system: true` strategy → 409.
-Deactivate with `{ "active": false }`.
-
-#### `DELETE /api/v1/strategy-templates/{id}` → **204** · 404 · 409
-
-Hard delete, cascading to the knob definitions. `409` when `instanceCount > 0`
-(the message names the count and suggests deactivating) or when `system: true`.
-
----
-
-### 5.2 Strategy parameters — `/api/v1/strategy-templates/{id}/params`
-
-Indicator parameters, at the level users actually set them. Use these for
-incremental editing; use `PUT /strategies/{id}` with `params[]` for bulk replace.
-
-| Method | Path | Status |
+| Field | Default on create | Notes |
 |---|---|---|
-| GET | `/api/v1/strategy-templates/{id}/params` | 200 → `StrategyParamDefinition[]` |
-| POST | `/api/v1/strategy-templates/{id}/params` | **201** · 400 · 404 · 409 |
-| PUT | `/api/v1/strategy-templates/{id}/params/{paramId}` | 200 · 400 · 404 · 409 |
-| DELETE | `/api/v1/strategy-templates/{id}/params/{paramId}` | **204** · 404 · 409 |
+| `strategyId` / `strategyName` | — | required on create, ignored on update |
+| `name` | the template's name | UNIQUE per user → 409 |
+| `symbolId` / `symbol` + `exchangeCode` | none | needed before deploying |
+| `candleDuration` | none | needed before deploying; part of the dedup identity |
+| `triggerDuration` | none | never hashed |
+| `derivative` | `OPTION` | |
+| `ceEnabled` / `peEnabled` | `false` | **setting `ceMoneyness` turns the call side on** |
+| `ceStrikeOffset` / `peStrikeOffset` | `0` | must be 0 for ATM, 1–15 for ITM/OTM |
+| `lotRule` | `FIXED` | non-FIXED needs `averagingCount ≥ 1` |
+| `baseLot` | `1` | ≥ 1 |
+| `averagingCount` | `0` | 0–10 |
+| `slPct` / `tpPct` | `null` | 0 < x ≤ 100 |
+| `indicators[].params` | schema defaults | **merged** over what is stored |
+| `active` | `true` | archive without deleting |
 
-Request body (POST and PUT):
+An indicator entry is addressed by `indicatorName`, `indicatorId`, or
+`userStrategyIndicatorId` — plus `slot` only when a template uses one indicator
+twice.
 
-```json
-{ "parameterKey": "fast", "dataType": "int", "scope": "signal",
-  "defaultValue": "9", "validation": { "min": 2, "max": 200 },
-  "displayLabel": "Fast EMA period", "displayOrder": 1, "required": true }
-```
-
-Required on POST: `parameterKey` (≤100), `dataType`, `scope`.
-On PUT, `parameterKey` / `dataType` / `scope` may be omitted to keep their current
-values. `displayOrder` defaults to `0`, `required` to `true`.
-
-`enum` requires a non-empty `validation.options`. A `gt` / `lt` rule must name an
-existing sibling parameter key.
-
-**409 cases:** duplicate `parameterKey` on the strategy; strategy is `system`;
-DELETE of a parameter the rule tree still binds (`$fast`) — edit the tree first.
-
----
-
-### 5.3 Indicators — `/api/v1/indicators`
-
-| Method | Path | Status |
-|---|---|---|
-| GET | `/api/v1/indicators?active=true` | 200 → `Indicator[]` |
-| GET | `/api/v1/indicators/{id}` | 200 · 404 |
-| GET | `/api/v1/indicators/by-name/{name}` | 200 · 404 (name is case-insensitive) |
-| POST | `/api/v1/indicators` | **201** · 400 · 409 |
-| PUT | `/api/v1/indicators/{id}` | 200 · 400 · 404 · 409 |
-| DELETE | `/api/v1/indicators/{id}` | **204** · 404 · 409 |
-
-**`Indicator`**
+### 5.3 `GET /api/v1/my-strategies/{id}` — the editor shape
 
 ```json
 {
-  "id": "3f2a...",
-  "name": "EMA",
-  "paramSchema": { "period": { "type": "int", "min": 2, "max": 300 } },
-  "active": true,
-  "usedByStrategies": ["EMA Crossover"],
-  "createdAt": "2026-08-13T15:58:49.123+05:30"
+  "id": "…", "userId": "…",
+  "strategyId": "…", "strategyName": "EMA Averaging", "strategyDescription": "…",
+  "name": "NIFTY 21/9 both sides", "description": null,
+
+  "symbolId": "…", "symbol": "NIFTY",
+  "instrumentType": "index", "exchangeCode": "NSE",
+  "candleDuration": "5m", "triggerDuration": "5m",
+
+  "derivative": "OPTION",
+  "ceEnabled": true, "ceMoneyness": "OTM", "ceStrikeOffset": 1,
+  "peEnabled": true, "peMoneyness": "ATM", "peStrikeOffset": 0,
+  "legs": [ { "side":"CE", "moneyness":"OTM", "strikeOffset":1, "label":"CE OTM1" },
+            { "side":"PE", "moneyness":"ATM", "strikeOffset":0, "label":"PE ATM" } ],
+
+  "lotRule": "DOUBLE", "baseLot": 65, "averagingCount": 2,
+  "slPct": 1.50, "tpPct": 3.00,
+
+  "indicators": [ {
+      "id": "…", "indicatorId": "…", "indicatorName": "EMA AVERAGING",
+      "slot": null, "enabled": true, "displayOrder": 0,
+      "params": { "d": 9, "k": 21 },
+      "paramSchema": { "k": {"type":"int","min":1,"max":300,"default":21},
+                       "d": {"type":"int","min":1,"max":300,"default":9,"lt":"k"} } } ],
+
+  "sharedConfigId": "…", "configHash": "a3f1…",
+  "deployable": true, "deploymentCount": 3,
+  "active": true, "createdAt": "…", "updatedAt": "…"
 }
 ```
 
-`usedByStrategies` drives the UI: non-empty means delete and rename are blocked.
-There is no `updatedAt` on this resource.
+Two views of the same choice, on purpose:
 
-**Create / update body**
+- the `ce*` / `pe*` fields are the **editable** form — same names as the request,
+  so a round trip is edit-one-field-and-PUT-it-back;
+- `legs[]` is the same thing **derived for display** — iterate it for a summary
+  line without reimplementing "CE OTM1" from three fields. It is read-only, and
+  for a `FUT` strategy it is a single `{"side":"FUT","label":"FUT"}`.
+
+`deployable` is false until symbol and candle are set — use it to gate the deploy
+button. `deploymentCount` tells the user how many brokers an edit will move.
+
+### 5.4 `GET /api/v1/my-strategies/{id}/runtime` — the bot shape
+
+Same rows, resolved for something that has to place an order: `legs` resolved,
+indicator values coerced to their declared types, and `signalParams` exactly as
+hashed. Also carries `ruleTree`, `derivative`, `lotRule`, `baseLot`,
+`averagingCount`, `slPct`, `tpPct`, `sharedConfigId`, `configHash`.
+
+### 5.5 `POST /api/v1/my-strategies/{id}/deploy`
 
 ```json
-{ "name": "RSI",
-  "paramSchema": { "period": { "type": "int", "min": 2, "max": 100 } },
-  "active": true }
+{ "tradeMode": "paper", "multiplier": 1,
+  "targets": [ { "tradingAccountId": "acc-1" },
+               { "tradingAccountId": "acc-2", "multiplier": 2, "tradeMode": "live" },
+               { "userBrokerId": "brk-9" } ] }
 ```
 
-Names are normalized to **UPPERCASE** and must be unique (≤50 chars) — rule trees
-match indicators by name, so `"ema"` and `"EMA"` are the same indicator.
+A target names **one account** or **a whole broker setup** (`userBrokerId` fans
+out to every account under it). Request-level fields are defaults; a target that
+sets one wins. Each target may override `riskProfileId`, `multiplier`,
+`capitalAllocated`, `executionMode`, `tradeMode`.
 
-`paramSchema` is required and must declare at least one parameter. Each entry:
+The configuration is not in this body — it comes from the strategy, which is what
+makes every broker run identical maths off one shared computation.
 
+**Response — always 200 when the request itself was well-formed:**
+
+```json
+{ "userStrategyId": "…", "userStrategyName": "NIFTY 21/9 both sides",
+  "symbolId": "…", "symbol": "NIFTY", "candleDuration": "5m",
+  "sharedConfigId": "…", "configHash": "a3f1…",
+  "requested": 3, "deployed": 2, "failed": 1,
+  "results": [
+    { "tradingAccountId":"acc-1", "tradingAccountName":"main",
+      "userBrokerId":"brk-1", "brokerLabel":"My Dhan",
+      "status":"deployed", "subscription": { … }, "error": null },
+    { "tradingAccountId":"acc-2", "tradingAccountName":"hedge",
+      "userBrokerId":"brk-1", "brokerLabel":"My Dhan",
+      "status":"failed", "subscription": null,
+      "error":"Strategy NIFTY 21/9 both sides is already deployed on account hedge (subscriptionId=…)." }
+  ] }
 ```
-{ "<paramName>": { "type": <DataType>,      // required
-                   "min": <number>,          // optional
-                   "max": <number>,          // optional
-                   "options": [ ... ] } }    // optional, non-empty
-```
 
-> **This is where indicator parameters live.** There is no indicator-parameter
-> table and no per-parameter endpoint — by design. `paramSchema` declares the
-> *shape* of an indicator's inputs; the *values* come from the strategy's
-> parameters via `$` bindings in the rule tree. Don't build a CRUD screen for
-> indicator parameters; build a schema editor.
+**Render `results`, not the status code.** A 200 with `failed: 1` is the normal
+case for a re-deploy. Group by `brokerLabel`; show each failure's `error` inline
+on its row.
 
-PUT is partial. **409 cases:** rename while `usedByStrategies` is non-empty;
-delete while referenced; dropping a `paramSchema` key that a live rule tree still
-passes. Deactivating (`active: false`) is always allowed and is the escape hatch.
+400s that reject the whole call, before anything is written: empty `targets`, a
+target with neither id, an account named twice, an archived strategy, a strategy
+with no market yet.
+
+### 5.6 Deployments — `/api/v1/my-subscriptions`
+
+`POST` deploys to one account: `{ "userStrategyId", "tradingAccountId",
+"riskProfileId?", "multiplier?", "capitalAllocated?", "executionMode?",
+"tradeMode?" }`.
+
+`PUT /{id}` changes **only how this account runs it** — `multiplier`,
+`capitalAllocated`, `executionMode`, `tradeMode`, `riskProfileId`, `active`.
+Retuning the strategy is `PUT /api/v1/my-strategies/{id}`; there is deliberately
+no way to fork one broker's configuration.
+
+`GET` returns the deployment with the configuration read through the strategy —
+`derivative`, `legs`, `lotRule`, `baseLot`, `averagingCount`, `slPct`, `tpPct`,
+plus `signalParams`, `indicators[]` (resolved fingerprints), `configHash`, and
+`userBrokerId` / `brokerLabel` for grouping.
+
+`DELETE /{id}` withdraws from that broker. `DELETE /api/v1/my-strategies/{id}` is
+**409 while any deployment exists** — withdraw them first, or archive with
+`{"active": false}`.
+
+> **Precision.** `multiplier`, `capitalAllocated` and the risk limits are
+> `numeric(20,8)` and arrive as JSON numbers. Don't do arithmetic on them for
+> exact display.
 
 ---
 
-### 5.4 StrategySubscriptions — `/api/v1/my-subscriptions`
+## 6. Form validation to mirror client-side
 
-All calls are scoped to the authenticated user.
+The server enforces all of these and returns every failure at once. Mirroring
+them saves a round trip.
 
-| Method | Path | Status |
-|---|---|---|
-| GET | `/api/v1/my-subscriptions` | 200 → `StrategySubscription[]` |
-| GET | `/api/v1/my-subscriptions/{id}` | 200 · 404 |
-| POST | `/api/v1/my-subscriptions` | **201** · 400 · 404 · 409 |
-| PUT | `/api/v1/my-subscriptions/{id}` | 200 · 400 · 404 · 409 |
-| DELETE | `/api/v1/my-subscriptions/{id}` | **204** · 404 |
-
-#### Create
-
-```json
-{
-  "strategyId": "00000000-0000-0000-0000-00000000e0a1",
-  "symbolId": "7c2e...",
-  "tradingAccountId": "a41b...",
-  "riskProfileId": null,
-  "timeframe": "5m",
-  "params": { "fast": 9, "slow": 21, "sl_pct": 1.5, "tp_pct": 3.0 },
-  "quantity": 50,
-  "multiplier": 1,
-  "lotSize": null,
-  "capitalAllocated": null,
-  "executionMode": "FIXED_QTY",
-  "tradeMode": "paper"
-}
-```
-
-| Field | Required | Default | Notes |
-|---|---|---|---|
-| `strategyId` | yes\* | | \*or `strategyName` (exact, unique) |
-| `symbolId` | yes\* | | \*or `symbol` **+** `exchangeCode` together |
-| `tradingAccountId` | **yes** | | must belong to the caller and be active |
-| `timeframe` | **yes** | | see §3 |
-| `params` | in practice | `{}` | both scopes flat. Omitted keys fall back to their `defaultValue`; a `required` knob with `defaultValue: null` must be supplied or you get a 400 |
-| `riskProfileId` | no | `null` | |
-| `quantity` | no | `1` | |
-| `multiplier` | no | `1` | |
-| `lotSize`, `capitalAllocated` | no | `null` | |
-| `executionMode` | no | `FIXED_QTY` | |
-| `tradeMode` | no | `paper` | |
-
-The strategy must be `active`, the symbol must be `active`, the account must be
-`active` — otherwise `400`.
-
-**409:** the caller is already subscribed to this exact configuration on this
-account. The message includes the existing `subscriptionId`; offer "open the
-existing subscription" rather than a raw error.
-
-#### Update
-
-```json
-{ "params": { "fast": 13 },
-  "quantity": 75,
-  "tradeMode": "live",
-  "active": true }
-```
-
-Every field optional. `params` merges; everything else replaces. You cannot
-change `strategyId`, `symbolId`, `timeframe` or `tradingAccountId` — those define
-the instance identity. To move to a different symbol or account, delete and
-re-create.
-
-**409:** the repointed configuration would collide with another subscription the
-user already has on the same account.
-
-#### `StrategySubscription`
-
-```json
-{
-  "id": "b8d1...",
-  "userId": "11111111-2222-3333-4444-555555555555",
-  "strategyId": "00000000-0000-0000-0000-00000000e0a1",
-  "strategyName": "EMA Crossover",
-  "sharedConfigId": "6ae0...",
-  "configHash": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
-  "symbolId": "7c2e...",
-  "symbol": "NIFTY",
-  "timeframe": "5m",
-  "signalParams": { "fast": 9, "slow": 21 },
-  "execParams": { "sl_pct": 1.5, "tp_pct": 3.0 },
-  "indicators": ["EMA(period=9)", "EMA(period=21)"],
-  "tradingAccountId": "a41b...",
-  "tradingAccountName": "Primary",
-  "riskProfileId": null,
-  "riskProfileName": null,
-  "quantity": 50.00000000,
-  "multiplier": 1.00000000,
-  "lotSize": null,
-  "capitalAllocated": null,
-  "executionMode": "FIXED_QTY",
-  "tradeMode": "paper",
-  "active": true,
-  "version": 1,
-  "createdAt": "2026-08-13T15:58:49.123+05:30",
-  "updatedAt": "2026-08-13T15:58:49.123+05:30"
-}
-```
-
-`signalParams` and `execParams` come back **split**. To repopulate the edit form,
-merge them: `{ ...signalParams, ...execParams }`.
-
-`indicators` are resolved fingerprints — `EMA(period=9)`, not `EMA`.
-
----
-
-### 5.5 Strategy instances — `/api/v1/shared-strategy-configs` (read-only)
-
-| Method | Path | Status |
-|---|---|---|
-| GET | `/api/v1/shared-strategy-configs?status=active` | 200 → `SharedStrategyConfig[]` |
-| GET | `/api/v1/shared-strategy-configs/{id}` | 200 · 404 |
-| GET | `/api/v1/shared-strategy-configs/indicator-plan` | 200 |
-
-```json
-{
-  "id": "6ae0...", "strategyId": "0000...", "strategyName": "EMA Crossover",
-  "symbolId": "7c2e...", "symbol": "NIFTY", "timeframe": "5m",
-  "signalParams": { "fast": 9, "slow": 21 },
-  "configHash": "9f86d081...", "supersedesId": null, "status": "active",
-  "indicators": ["EMA(period=9)", "EMA(period=21)"],
-  "activeSubscribers": 2,
-  "createdAt": "2026-08-13T15:58:49.123+05:30"
-}
-```
-
-These rows carry no user identity, so they are safe to show platform-wide.
-`status` flips to `retired` automatically when the last active subscriber leaves.
-
-**Indicator plan** — an optional admin/insight widget:
-
-```json
-{ "activeStrategySubscriptions": 3, "distinctInstances": 3,
-  "distinctIndicators": 4,
-  "indicators": ["EMA(period=13)", "EMA(period=21)", "EMA(period=50)", "EMA(period=9)"] }
-```
-
-Three users on 9×21, 9×50 and 13×21 cost four EMA computations, not six. Good
-"platform efficiency" card.
-
----
-
-### 5.6 Broker catalog — `/api/v1/brokers`
-
-What fills the broker dropdown. Shared across all users; a user then creates
-their own setup against one of these (5.7).
-
-| Method | Path | Status |
-|---|---|---|
-| GET | `/api/v1/brokers` (`?activeOnly`, default true) | 200 → `Broker[]` |
-| GET | `/api/v1/brokers/{id}` | 200 · 404 |
-| GET | `/api/v1/brokers/by-code/{code}` | 200 · 404 |
-| POST | `/api/v1/brokers` | **201** · 400 · 409 |
-| POST | `/api/v1/brokers/bulk` | **201** · 400 · 409 |
-| PUT | `/api/v1/brokers/{id}` | 200 · 400 · 404 · 409 |
-| DELETE | `/api/v1/brokers/{id}` | **204** · 404 · 409 |
-
-```json
-{ "code": "DELTA",
-  "name": "Delta Exchange",
-  "description": "Delta India: broker and venue in one",
-  "apiBaseUrl": "https://api.india.delta.exchange",
-  "authType": "api_key" }
-```
-
-`code` is uppercased and must be `[A-Z0-9_]+` — it is a handle the adapters
-switch on, not a display label; `name` is the label. `authType` defaults to
-`api_key` and decides which credential fields the UI asks for later (see 5.9), so
-it is worth getting right at creation.
-
-`POST /bulk` takes an array of the same body and is all-or-nothing. It rejects
-duplicate codes **within the batch** before writing anything, so a clash cannot
-leave the earlier rows committed and the caller guessing which landed.
-
-> **This is shared master data.** These rows are not scoped to the caller —
-> editing one changes what every user sees, and every `user_brokers` row points
-> at one. Two rules follow:
->
-> - **`code` cannot change** (409). Adapters and every existing setup are keyed
->   on it; renaming would silently repoint them all. Deactivate and create the
->   new one instead.
-> - **DELETE is refused** (409) while any user's setup points at the row.
->   Deactivating is the way to retire a broker: it stops new setups without
->   breaking the ones that exist.
-
-> **Not role-gated yet.** Any authenticated caller can write here. The platform's
-> other shared catalogs (`exchanges`, `symbols`, `risk-profiles`) are read-only
-> for that reason. Put an admin check in front of the write methods before this
-> API is open to end users.
-
----
-
-### 5.7 Broker setups — `/api/v1/my-brokers`
-
-**Set the broker up first, then create accounts in it.** One setup holds one
-login and its API key; the accounts underneath it share that key.
-
-```
-GET /api/v1/brokers            DELTA, DHAN, ZERODHA ...   shared catalog
-  POST /api/v1/my-brokers      "My Delta"                 the caller's setup
-    PUT  .../{id}/credentials  api key + secret           entered once
-      POST /api/v1/trading-accounts   main, hedge         the accounts
-```
-
-| Method | Path | Status |
-|---|---|---|
-| GET | `/api/v1/my-brokers` (`?brokerId`, `?active`) | 200 → `UserBroker[]` |
-| GET | `/api/v1/my-brokers/{id}` | 200 · 404 |
-| POST | `/api/v1/my-brokers` | **201** · 400 · 404 · 409 |
-| PUT | `/api/v1/my-brokers/{id}` | 200 · 400 · 404 · 409 |
-| DELETE | `/api/v1/my-brokers/{id}` | **204** · 404 · 409 |
-
-```json
-{ "brokerCode": "DELTA" }
-```
-
-That is the whole create body. `label` defaults to the broker's name, so one
-setup per broker needs nothing else. A second Delta login needs a distinct label
-— `UNIQUE (user_id, label)`.
-
-```json
-{ "id": "77aa...", "brokerId": "b1c2...", "brokerCode": "DELTA",
-  "brokerName": "Delta Exchange", "authType": "api_key",
-  "label": "My Delta", "active": true,
-  "credentialsConfigured": true,
-  "tradingAccountCount": 3, "accountsWithOwnCredentials": 1,
-  "rotatedAt": null, "createdAt": "...", "updatedAt": "..." }
-```
-
-**A setup cannot change broker** (409). Its key and all its accounts belong to
-the broker that issued them; a different broker is a different setup.
-
-**409 on delete** while `tradingAccountCount > 0` — offer "deactivate" instead.
-
-Credentials live at `.../my-brokers/{id}/credentials` — see 5.9.
-
-#### One-call setup — `POST /api/v1/my-brokers/setup`
-
-For the "add a broker" wizard. Creates the setup, its first account and its API
-key **in one transaction**, so a rejected key takes the setup and account back
-out with it. `201` · `400` · `404` · `409`.
-
-```json
-{ "brokerCode": "DELTA",
-  "label": "My Delta",
-  "account": { "accountName": "main", "brokerAccountId": "42891" },
-  "credentials": { "apiKey": "abc123", "apiSecret": "s3cr3t" } }
-```
-
-```json
-{ "broker":      { "id": "77aa...", "brokerCode": "DELTA", "label": "My Delta",
-                   "credentialsConfigured": true, "tradingAccountCount": 1, "...": "..." },
-  "account":     { "id": "a41b...", "accountName": "main",
-                   "credentialsConfigured": true, "credentialsOverridden": false, "...": "..." },
-  "credentials": { "apiKeyHint": "****c123", "hasApiSecret": true, "...": "..." } }
-```
-
-Everything the next screen needs, with no follow-up `GET`. `account` is null when
-none was requested and `credentials` is null when no key was sent, so "not asked
-for" is distinguishable from "failed".
-
-**Credentials go on the setup by default.** That is right when the key belongs to
-the login rather than to one account — every account added later inherits it and
-needs no key at all. Send `"credentialsScope": "ACCOUNT"` only for brokers that
-really do issue a separate key per sub-account; it needs an `account` in the same
-body, and writes an override instead.
-
-`account` and `credentials` are both optional — omit either to build the rest now
-and finish through the individual endpoints later.
-
-This composes the three endpoints rather than replacing them; every validation
-and conflict rule is the same one, and changing any of the three afterwards still
-goes through its own endpoint.
-
-
----
-
-### 5.8 Trading accounts — `/api/v1/trading-accounts`
-
-The accounts under a setup. This is what a subscription points at.
-
-| Method | Path | Status |
-|---|---|---|
-| GET | `/api/v1/trading-accounts` (`?userBrokerId`) | 200 → `TradingAccount[]` |
-| GET | `/api/v1/trading-accounts/{id}` | 200 · 404 |
-| POST | `/api/v1/trading-accounts` | **201** · 400 · 404 · 409 |
-| PUT | `/api/v1/trading-accounts/{id}` | 200 · 400 · 404 · 409 |
-| DELETE | `/api/v1/trading-accounts/{id}` | **204** · 404 · 409 |
-
-```json
-{ "userBrokerId": "77aa...", "accountName": "main",
-  "brokerAccountId": "42891" }
-```
-
-`userBrokerId` and `accountName` required; `accountName` unique **within the
-setup**, so a Delta "main" and a Dhan "main" coexist. `brokerAccountId` is the
-broker's own id for this account — a Delta sub-account id, a Dhan client id — and
-is what tells two accounts under one shared key apart when an order goes out.
-
-> **There is no exchange field.** It was removed: where an order goes is decided
-> by the symbol, which already knows its venue. One Dhan account now trades NSE
-> and BSE as one row, and Delta stops needing a meaningless value.
-
-```json
-{ "id": "a41b...", "userBrokerId": "77aa...", "userBrokerLabel": "My Delta",
-  "brokerId": "b1c2...", "brokerCode": "DELTA", "brokerName": "Delta Exchange",
-  "brokerAuthType": "api_key",
-  "accountName": "main", "brokerAccountId": "42891", "active": true,
-  "credentialsConfigured": true, "credentialsOverridden": false,
-  "activeStrategySubscriptions": 2,
-  "createdAt": "...", "updatedAt": "..." }
-```
-
-`credentialsConfigured` answers "can this account authenticate?" — true whether
-the key is its own or inherited. `credentialsOverridden` says which of the two.
-
-**An account cannot move between setups** (409), for the same reason a setup
-cannot change broker.
-
-**409 on delete** while `activeStrategySubscriptions > 0`.
-
----
-
-### 5.9 Broker credentials — two levels
-
-The same body and the same response shape at both levels:
-
-| Method | Path | Writes |
-|---|---|---|
-| GET · PUT · DELETE | `/api/v1/my-brokers/{id}/credentials` | the setup's key, shared by all its accounts |
-| GET · PUT · DELETE | `/api/v1/trading-accounts/{id}/credentials` | one account's **override** of it |
-
-**Which fields to render** comes from `authType`:
-
-| `authType` | Fields that matter |
+| Rule | Message shape |
 |---|---|
-| `api_key` | `apiKey`, `apiSecret`, `clientId` |
-| `oauth_redirect` | `apiKey`, `apiSecret`, `redirectUrl`, then `accessToken` daily |
-| `totp` | `apiKey`, `apiSecret`, `clientId`, `totpSecret` |
-
-```json
-PUT /api/v1/my-brokers/{id}/credentials
-{ "apiKey": "abc123", "apiSecret": "s3cr3t", "clientId": "1100112233" }
-```
-
-**PUT is partial, and that is the point.** A field left out keeps its stored
-value, so storing today's access token is one field — the caller never resends an
-API secret it is not allowed to read back:
-
-```json
-PUT { "accessToken": "eyJ...", "tokenExpiresAt": "2026-08-22T03:30:00Z" }
-```
-
-To remove a value, send an empty string: `{"totpSecret": ""}`.
-
-**Overrides resolve per field, not per row.** An account that overrides only
-`accessToken` still uses the setup's `apiKey` and `apiSecret`. Clearing the last
-overridden field deletes the override entirely and the account goes back to
-inheriting everything — same rule as the strategy parameter overrides in 5.4.
-
-> **No secret is ever returned — not even to the user who wrote it.** `GET`
-> answers what is *set*, not what it is. Render "API secret: ******** (set)" with
-> a change button; never try to prefill a secret field.
-
-```json
-{ "userBrokerId": "77aa...", "tradingAccountId": "a41b...",
-  "brokerCode": "DELTA", "authType": "api_key",
-  "apiKeyHint": "****c123", "hasApiKey": true, "hasApiSecret": true,
-  "hasAccessToken": true, "hasRefreshToken": false, "hasTotpSecret": false,
-  "redirectUrl": null, "clientId": "1100112233",
-  "tokenExpiresAt": "2026-08-22T03:30:00Z", "tokenExpired": false,
-  "overriddenFields": ["accessToken"],
-  "vaultRef": null, "rotatedAt": null, "createdAt": "...", "updatedAt": "..." }
-```
-
-`tradingAccountId` is null on a setup read, and `overriddenFields` is always
-empty there. On an account read, the `has*` flags describe the **effective**
-state and `overriddenFields` names the ones that came from the account itself —
-so `[]` means it runs entirely on the setup's key.
-
-`tokenExpired: true` is the cue to send the user back through the broker login.
-
-Secrets are stored as AES-GCM ciphertext (`SecretCipher`, key from
-`CREDENTIAL_ENCRYPTION_KEY`); `redirectUrl` and `clientId` are plaintext because
-neither is a secret. If the key is unset the server still starts, `GET` still
-reports what is set, and every write fails with a clear message.
+| OPTION with neither side on | `derivative is OPTION but neither side is on…` |
+| FUT with a side still on | `derivative is FUT, so no CE or PE side applies…` |
+| Side on with no moneyness | `ceMoneyness is required while ceEnabled is true…` |
+| Depth on ATM | `ceStrikeOffset must be 0 for ATM…` |
+| Depth out of range | `ceStrikeOffset must be 1..15 for OTM, got 16` |
+| `baseLot < 1` | `baseLot must be at least 1…` |
+| `averagingCount` outside 0–10 | `averagingCount must be 0..10…` |
+| Non-FIXED ladder with 0 adds | `lotRule DOUBLE has no effect while averagingCount is 0…` |
+| `slPct` / `tpPct` outside (0, 100] | `slPct must be greater than 0…` |
+| Indicator value out of range | `Indicator 'EMA AVERAGING' parameter 'k' must be <= 300, got 400` |
+| Indicator cross-field | `…parameter 'd' must be less than 'k' (21 vs 9)` |
+| Unknown indicator key | `Indicator 'EMA AVERAGING' has no parameter 'period' - it declares [k, d]` |
 
 ---
 
-### 5.10 Reference data — read-only
+## 7. Worked example — the spreadsheet, end to end
 
-| Method | Path | Notes |
-|---|---|---|
-| GET | `/api/v1/exchanges?status=active` | `ExchangeResponse[]` |
-| GET | `/api/v1/exchanges/{id}` | |
-| GET | `/api/v1/symbols?exchangeId={uuid}&activeOnly=true` | both params optional; `activeOnly` defaults to **true** |
-| GET | `/api/v1/symbols/{id}` | |
-| GET | `/api/v1/risk-profiles` | |
-| GET | `/api/v1/risk-profiles/{id}` | |
+The sheet describes: EMA High (K) 21, EMA (D) 9, 5 MIN, NIFTY, OPTION, OTM1,
+Double LOT from a base of 65, averaging 2. Both a call and a put.
 
-```json
-// Exchange
-{ "id": "d0c1...", "name": "National Stock Exchange of India",
-  "code": "NSE", "description": "NSE cash, futures and options", "status": "active" }
+```http
+POST /api/v1/my-strategies
+{ "strategyName": "EMA Averaging",
+  "name": "NIFTY 21/9",
+  "symbol": "NIFTY", "exchangeCode": "NSE",
+  "candleDuration": "5m", "triggerDuration": "5m",
+  "derivative": "OPTION",
+  "ceEnabled": true, "ceMoneyness": "OTM", "ceStrikeOffset": 1,
+  "peEnabled": true, "peMoneyness": "OTM", "peStrikeOffset": 1,
+  "lotRule": "DOUBLE", "baseLot": 65, "averagingCount": 2,
+  "indicators": [ { "indicatorName": "EMA AVERAGING", "params": { "k": 21, "d": 9 } } ] }
+→ 201, deployable: true
 
-// Symbol
-{ "id": "7c2e...", "exchangeId": "d0c1...", "exchangeCode": "NSE",
-  "symbol": "NIFTY", "baseAsset": null, "quoteAsset": null,
-  "instrumentType": "index", "optionType": null, "strikePrice": null,
-  "expiryAt": null, "contractSize": null, "tickSize": 0.05000000,
-  "minQty": 1.00000000, "active": true }
-
-// Risk profile
-{ "id": "5b7d...", "name": "Conservative",
-  "description": "Low exposure defaults for paper trading",
-  "maxDailyLoss": 5000.00000000, "maxDrawdown": 10000.00000000,
-  "maxPositionSize": 50000.00000000, "maxTotalExposure": null,
-  "maxTradesPerDay": 10, "killSwitchEnabled": true }
+POST /api/v1/my-strategies/{id}/deploy
+{ "tradeMode": "paper",
+  "targets": [ {"userBrokerId": "<my Dhan>"}, {"tradingAccountId": "<Zerodha main>"} ] }
+→ 200, deployed: 3, failed: 0
 ```
 
-There are **no write endpoints** for these three — they are operational master
-data (symbols come from the exchange's instrument feed) and the API layer has no
-role model to gate writes with. Don't build create/edit screens.
+The sheet's second block — EMA High 50, EMA 21 — is the **same template** with
+different values, so it is a second strategy, not a second template:
 
-**Symbol picker guidance.** The signal symbol is what indicators run on — by
-convention the underlying (`instrumentType` of `index` or `spot`), not an option
-contract. Default the picker to those and de-emphasize `option` rows.
-
-### 5.11 The caller's risk limits — `/api/v1/me/risk-limits`
-
-```
-GET  /api/v1/me/risk-limits   → 200
-PUT  /api/v1/me/risk-limits   → 200 · 400
+```http
+POST /api/v1/my-strategies
+{ "strategyName": "EMA Averaging", "name": "NIFTY 50/21", … ,
+  "indicators": [ { "indicatorName": "EMA AVERAGING", "params": { "k": 50, "d": 21 } } ] }
 ```
 
-```json
-{ "userId": "1111...", "maxDailyLoss": 5000.00000000,
-  "maxOpenPositions": 5, "maxTotalExposure": null,
-  "updatedAt": "2026-08-13T15:58:49.123+05:30" }
-```
-
-PUT body accepts `maxDailyLoss`, `maxOpenPositions`, `maxTotalExposure`; all
-optional, none may be negative.
-
-> **PUT here is a full replace, not a patch.** An omitted field is set to `null`
-> (cleared). Always send all three fields from the loaded form state.
-
-GET returns all-null values with a `null` `updatedAt` when the user has never set
-limits — that is a valid empty state, not an error.
-
-These are **aggregate** caps across every subscription. A `risk_profile` caps a
-single subscription. Label them distinctly or users will conflate them.
-
----
-
-## 6. Rendering the configuration form dynamically
-
-Never hardcode `fast` / `slow` / `sl_pct`. A new strategy ships its own form.
-
-Sort by `displayOrder`, then group by `scope`.
-
-| `dataType` | Control | Constraints from `validation` |
-|---|---|---|
-| `int` | number input, `step=1` | `min`, `max` |
-| `decimal` | number input, `step=any` | `min`, `max` |
-| `bool` | checkbox / toggle | — |
-| `enum` | select | `options[]` (always present) |
-| `timeframe` | select from the timeframe list (§3) | `options[]` if present |
-| `text` | text input | — |
-
-Additional `validation` keys:
-
-| Key | Meaning | Client rule |
-|---|---|---|
-| `min` / `max` | inclusive numeric bounds | standard |
-| `options` | allowed values | populate the select |
-| `gt` | **must exceed another parameter** — value is a `parameterKey` | cross-field: `value > form[validation.gt]` |
-| `lt` | must be below another parameter | `value < form[validation.lt]` |
-
-`{"min":3,"max":300,"gt":"fast"}` on `slow` means: between 3 and 300, **and**
-strictly greater than whatever `fast` currently holds. Re-validate `slow` when
-`fast` changes.
-
-Initial values: `defaultValue` — remembering it is **always a string**. Coerce by
-`dataType` (`parseInt`, `parseFloat`, `=== 'true'`) before putting it in state, or
-numeric comparisons in the `gt` rule will compare strings.
-
-`required: true` with a non-null `defaultValue` means the field is pre-filled and
-may be left as-is; `required: true` with `defaultValue: null` means the user must
-supply it.
-
-Client-side validation is a UX nicety — **the server re-validates everything** and
-returns the full `errors[]`. Always render server errors even if your client
-thought the form was valid.
-
----
-
-## 7. Rule tree grammar (for the builder canvas)
-
-`ruleTree` is a free-form JSON object. Two things inside it are meaningful to this
-API:
-
-**Indicator node**
-
-```json
-{ "ind": "EMA", "params": { "period": "$fast" } }
-```
-
-- `ind` — must match an `indicators.name`, active, case-sensitive (uppercase).
-- `params` keys — must exist in that indicator's `paramSchema`.
-- values — either a `"$binding"` referencing a strategy `parameterKey`, or a literal.
-
-**Binding**
-
-Any string starting with `$` anywhere in the tree is a placeholder resolved
-against the strategy's **signal-scope** parameters at subscribe time.
-
-Everything else — `entry`, `exit`, `cross_above`, `cross_below`, `const`, and any
-operator you invent — is passed through untouched.
-
-> **The API does not validate the operator vocabulary.** It validates indicator
-> names, indicator parameter keys, and `$` bindings only. A tree with a typo in
-> `cross_above` will save successfully and fail later in the engine. If the
-> builder offers an operator palette, that palette is the frontend's contract to
-> enforce.
-
-What the server rejects at save time:
-
-| Error | Cause |
-|---|---|
-| `ruleTree is required and must be a non-empty JSON object` | empty tree |
-| `ruleTree references no indicators - expected at least one {"ind":"..."} node` | no indicator node |
-| `ruleTree references unknown indicator 'X'` | no such `indicators.name` |
-| `ruleTree references inactive indicator 'X'` | exists but `active: false` |
-| `Indicator 'EMA' has no parameter 'length' - its schema declares [period]` | key not in `paramSchema` |
-| `ruleTree binds $fast but the strategy defines no parameter 'fast'` | missing knob |
-
-The same indicator may appear many times at different parameterizations — that is
-exactly what EMA Crossover does with `$fast` and `$slow`, and it is why there is
-no strategy-to-indicator join table to query.
-
----
-
-## 8. Gotchas
-
-1. **`204` responses have no body.** Don't call `response.json()` on a DELETE.
-2. **`404` can mean "someone else's".** Never render "this was deleted" with
-   certainty; "not found or not available" is the honest message.
-3. **Strategy parameter ids are integers**; every other id is a UUID string.
-4. **`defaultValue` is a string** even for numeric types.
-5. **StrategySubscription `PUT` merges `params`, replaces everything else.**
-6. **Risk-limits `PUT` clears omitted fields.** Send all three.
-7. **`configHash` changing is normal** after a signal-parameter edit. The
-   subscription `id` is stable — key your list on it, not on the hash or instance id.
-8. **A `409` message is usually actionable** — it names the blocking count, the
-   conflicting id, or the "deactivate instead" alternative. Show the message text.
-9. **`system: true` strategies are read-only.** Disable the controls rather than
-   letting the user discover it via a 409.
-10. **Empty reference data is possible on a fresh environment.** Exchanges,
-    symbols and risk profiles are seeded by ops, not by the app. Handle `[]`
-    gracefully instead of rendering an empty picker with no explanation.
-
----
-
-## 9. Suggested TypeScript types
-
-```ts
-export interface ApiError { error: string; errors?: string[] }
-
-export interface StrategyParamDefinition {
-  id: number;
-  parameterKey: string;
-  dataType: DataType;
-  scope: ParamScope;
-  defaultValue: string | null;
-  validation: Record<string, unknown>;   // {} when none
-  displayLabel: string | null;
-  displayOrder: number;
-  required: boolean;
-}
-
-export interface StrategyDetail {
-  id: string; name: string; version: number; description: string | null;
-  system: boolean; active: boolean;
-  ruleTree: Record<string, unknown>;
-  indicators: string[]; unknownIndicators: string[];
-  params: StrategyParamDefinition[];
-  instanceCount: number;
-  createdAt: string; updatedAt: string;
-}
-
-export interface Indicator {
-  id: string; name: string;
-  paramSchema: Record<string, { type: DataType; min?: number; max?: number; options?: unknown[] }>;
-  active: boolean; usedByStrategies: string[]; createdAt: string;
-}
-
-export interface StrategySubscription {
-  id: string; userId: string;
-  strategyId: string; strategyName: string;
-  sharedConfigId: string; configHash: string;
-  symbolId: string; symbol: string; timeframe: string;
-  signalParams: Record<string, unknown>;
-  execParams: Record<string, unknown>;
-  indicators: string[];
-  tradingAccountId: string; tradingAccountName: string;
-  riskProfileId: string | null; riskProfileName: string | null;
-  quantity: number; multiplier: number;
-  lotSize: number | null; capitalAllocated: number | null;
-  executionMode: ExecutionMode; tradeMode: TradeMode;
-  active: boolean; version: number;
-  createdAt: string; updatedAt: string;
-}
-
-export interface SharedStrategyConfig {
-  id: string; strategyId: string; strategyName: string;
-  symbolId: string; symbol: string; timeframe: string;
-  signalParams: Record<string, unknown>;
-  configHash: string; supersedesId: string | null;
-  status: InstanceStatus; indicators: string[];
-  activeSubscribers: number; createdAt: string;
-}
-
-export interface UserBroker {
-  id: string; brokerId: string; brokerCode: string; brokerName: string;
-  authType: BrokerAuthType; label: string; active: boolean;
-  credentialsConfigured: boolean;
-  tradingAccountCount: number; accountsWithOwnCredentials: number;
-  rotatedAt: string | null; createdAt: string; updatedAt: string;
-}
-
-export interface TradingAccount {
-  id: string;
-  userBrokerId: string | null; userBrokerLabel: string | null;
-  brokerId: string | null; brokerCode: string | null;
-  brokerName: string | null; brokerAuthType: BrokerAuthType | null;
-  accountName: string; brokerAccountId: string | null; active: boolean;
-  /** True when it can authenticate at all - own key or inherited. */
-  credentialsConfigured: boolean;
-  /** True when the key is its own rather than the setup's. */
-  credentialsOverridden: boolean;
-  activeStrategySubscriptions: number; createdAt: string; updatedAt: string;
-}
-
-export type BrokerAuthType = "api_key" | "oauth_redirect" | "totp";
-
-export interface Broker {
-  id: string; code: string; name: string;
-  description: string | null; apiBaseUrl: string | null;
-  authType: BrokerAuthType; active: boolean;
-}
-
-/** No secret is returned. Booleans say what is set; apiKeyHint is the last 4.
- *  Read at the account level, the flags are the EFFECTIVE state. */
-export interface BrokerCredentials {
-  userBrokerId: string;
-  /** Null on a setup read; set when reading one account's view. */
-  tradingAccountId: string | null;
-  brokerCode: string | null; authType: BrokerAuthType | null;
-  apiKeyHint: string | null;
-  hasApiKey: boolean; hasApiSecret: boolean; hasAccessToken: boolean;
-  hasRefreshToken: boolean; hasTotpSecret: boolean;
-  redirectUrl: string | null; clientId: string | null;
-  tokenExpiresAt: string | null; tokenExpired: boolean;
-  /** Fields this account supplies itself. Empty = inherits everything. */
-  overriddenFields: string[];
-  vaultRef: string | null; rotatedAt: string | null;
-  createdAt: string; updatedAt: string;
-}
-
-export interface Exchange {
-  id: string; name: string; code: string;
-  description: string | null; status: ExchangeStatus;
-}
-
-export interface SymbolRef {
-  id: string; exchangeId: string; exchangeCode: string; symbol: string;
-  baseAsset: string | null; quoteAsset: string | null;
-  instrumentType: InstrumentType; optionType: OptionType | null;
-  strikePrice: number | null; expiryAt: string | null;
-  contractSize: number | null; tickSize: number | null; minQty: number | null;
-  active: boolean;
-}
-
-export interface RiskProfile {
-  id: string; name: string; description: string | null;
-  maxDailyLoss: number | null; maxDrawdown: number | null;
-  maxPositionSize: number | null; maxTotalExposure: number | null;
-  maxTradesPerDay: number | null; killSwitchEnabled: boolean;
-}
-
-export interface UserRiskLimits {
-  userId: string;
-  maxDailyLoss: number | null; maxOpenPositions: number | null;
-  maxTotalExposure: number | null; updatedAt: string | null;
-}
-```
-
----
-
-## 10. Endpoint index
-
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/api/v1/strategy-templates` | list (`?active`, `?search`) |
-| GET | `/api/v1/strategy-templates/{id}` | detail |
-| GET | `/api/v1/strategy-templates/by-name/{name}` | detail by unique name |
-| POST | `/api/v1/strategy-templates` | create |
-| PUT | `/api/v1/strategy-templates/{id}` | update / deactivate |
-| DELETE | `/api/v1/strategy-templates/{id}` | delete |
-| GET | `/api/v1/strategy-templates/{id}/params` | list knobs |
-| POST | `/api/v1/strategy-templates/{id}/params` | add knob |
-| PUT | `/api/v1/strategy-templates/{id}/params/{paramId}` | update knob |
-| DELETE | `/api/v1/strategy-templates/{id}/params/{paramId}` | delete knob |
-| GET | `/api/v1/indicators` | list (`?active`) |
-| GET | `/api/v1/indicators/{id}` | detail |
-| GET | `/api/v1/indicators/by-name/{name}` | detail by name |
-| POST | `/api/v1/indicators` | create |
-| PUT | `/api/v1/indicators/{id}` | update schema / deactivate |
-| DELETE | `/api/v1/indicators/{id}` | delete |
-| GET | `/api/v1/my-subscriptions` | the caller's configurations |
-| GET | `/api/v1/my-subscriptions/{id}` | detail |
-| POST | `/api/v1/my-subscriptions` | subscribe |
-| PUT | `/api/v1/my-subscriptions/{id}` | edit / pause / resume |
-| DELETE | `/api/v1/my-subscriptions/{id}` | unsubscribe |
-| GET | `/api/v1/shared-strategy-configs` | shared configs (`?status`) |
-| GET | `/api/v1/shared-strategy-configs/{id}` | detail |
-| GET | `/api/v1/shared-strategy-configs/indicator-plan` | dedup report |
-| GET | `/api/v1/my-brokers` | the caller's broker setups (`?brokerId`, `?active`) |
-| GET | `/api/v1/my-brokers/{id}` | detail |
-| POST | `/api/v1/my-brokers` | set a broker up |
-| POST | `/api/v1/my-brokers/setup` | setup + first account + key, one transaction |
-| PUT | `/api/v1/my-brokers/{id}` | rename / deactivate |
-| DELETE | `/api/v1/my-brokers/{id}` | delete (409 while accounts exist) |
-| GET | `/api/v1/my-brokers/{id}/credentials` | masked status |
-| PUT | `/api/v1/my-brokers/{id}/credentials` | store / rotate the setup key |
-| DELETE | `/api/v1/my-brokers/{id}/credentials` | remove the setup key |
-| GET | `/api/v1/trading-accounts` | the caller's accounts (`?userBrokerId`) |
-| GET | `/api/v1/trading-accounts/{id}` | detail |
-| POST | `/api/v1/trading-accounts` | create |
-| PUT | `/api/v1/trading-accounts/{id}` | rename / deactivate |
-| DELETE | `/api/v1/trading-accounts/{id}` | delete |
-| GET | `/api/v1/trading-accounts/{id}/credentials` | effective status (inherited + overrides) |
-| PUT | `/api/v1/trading-accounts/{id}/credentials` | override fields for this account |
-| DELETE | `/api/v1/trading-accounts/{id}/credentials` | drop the override, inherit again |
-| GET | `/api/v1/brokers` | catalog (`?activeOnly`) |
-| GET | `/api/v1/brokers/{id}` | detail |
-| GET | `/api/v1/brokers/by-code/{code}` | detail by unique code |
-| POST | `/api/v1/brokers` | add one to the catalog |
-| POST | `/api/v1/brokers/bulk` | add several, all or nothing |
-| PUT | `/api/v1/brokers/{id}` | update (code is immutable) |
-| DELETE | `/api/v1/brokers/{id}` | delete (409 while any setup uses it) |
-| GET | `/api/v1/exchanges` | reference (`?status`) |
-| GET | `/api/v1/exchanges/{id}` | reference |
-| GET | `/api/v1/symbols` | reference (`?exchangeId`, `?activeOnly`) |
-| GET | `/api/v1/symbols/{id}` | reference |
-| GET | `/api/v1/risk-profiles` | reference |
-| GET | `/api/v1/risk-profiles/{id}` | reference |
-| GET | `/api/v1/me/risk-limits` | caller's aggregate caps |
-| PUT | `/api/v1/me/risk-limits` | set caps (full replace) |
-
-Not part of this module and unchanged: `/api/v1/auth/**` (login, refresh,
-logout) and `/api/v1/strategy/**` (the legacy platform-wide on/off switches).
-
-**Removed:** the Dhan token endpoints (`/api/dhan/token`). They stored one
-platform-wide token that every user shared. Broker tokens are now per trading
-account, encrypted, at `PUT /api/v1/my-brokers/{id}/credentials`.
+Both are valid because the `EMA AVERAGING` schema declares `d` with `lt: k`.
+`{"k": 9, "d": 21}` would be rejected — that is the `EMA Crossover` template's
+shape, which declares the constraint the other way round.

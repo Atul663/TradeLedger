@@ -1,28 +1,34 @@
 package com.example.tradeLedger.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 import java.util.UUID;
 
 /**
- * Create / update body for {@code trading_accounts}.
- *
- * An account belongs to a broker setup, so {@code userBrokerId} is the only
- * pointer it needs - the broker, and the credentials it inherits, come from
- * there. There is no exchange field: where an order goes is decided by the
- * symbol, which already knows its venue.
+ * One account under a broker setup - the thing a strategy is deployed onto.
  */
+@Schema(name = "TradingAccountRequest",
+        description = """
+                One account under a broker setup. This is what a strategy is deployed onto, and \
+                adding a second account here is what makes a userBrokerId deploy target fan out.
+
+                No exchange: where an order goes is decided by the strategy's symbol, which \
+                already knows its venue. Credentials are inherited from the setup unless this \
+                account overrides them at /api/v1/trading-accounts/{id}/credentials.""")
 public class TradingAccountRequest {
 
-    /** The setup this account lives under. Required on create. */
+    @Schema(description = "The setup this account hangs off. An account cannot move between setups.",
+            example = "ub000000-1111-4222-8333-444444444444")
     private UUID userBrokerId;
 
+    @Schema(description = "Your own label, unique within the setup.", example = "hedge", maxLength = 100)
     private String accountName;
 
-    /**
-     * The broker's own id for this account - a Delta sub-account id, a Dhan
-     * client id. What tells two accounts under one shared API key apart.
-     */
+    @Schema(description = "The broker's own identifier for the account.", example = "1100112244")
     private String brokerAccountId;
 
+    @Schema(description = "An inactive account is refused at deploy time.",
+            example = "true", defaultValue = "true")
     private Boolean active;
 
     public UUID getUserBrokerId() { return userBrokerId; }

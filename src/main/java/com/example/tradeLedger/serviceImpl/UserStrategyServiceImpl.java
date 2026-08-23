@@ -1,42 +1,39 @@
 package com.example.tradeLedger.serviceImpl;
 
-import com.example.tradeLedger.dto.EffectiveParameterResponse;
-import com.example.tradeLedger.dto.ParameterOverrideRequest;
+import com.example.tradeLedger.dto.StrategyDeployRequest;
+import com.example.tradeLedger.dto.StrategyDeploymentResponse;
 import com.example.tradeLedger.dto.StrategySubscriptionRequest;
 import com.example.tradeLedger.dto.StrategySubscriptionResponse;
 import com.example.tradeLedger.dto.UserStrategyIndicatorResponse;
 import com.example.tradeLedger.dto.UserStrategyRequest;
 import com.example.tradeLedger.dto.UserStrategyResponse;
 import com.example.tradeLedger.dto.UserStrategyRuntimeResponse;
-import com.example.tradeLedger.dto.UserStrategySubscribeRequest;
-import com.example.tradeLedger.dto.UserStrategyUpdateRequest;
+import com.example.tradeLedger.entity.Derivative;
 import com.example.tradeLedger.entity.Indicator;
-import com.example.tradeLedger.entity.IndicatorParameterLink;
-import com.example.tradeLedger.entity.Parameter;
-import com.example.tradeLedger.entity.StrategyIndicatorLink;
-import com.example.tradeLedger.entity.StrategyParameterLink;
+import com.example.tradeLedger.entity.LotRule;
+import com.example.tradeLedger.entity.Moneyness;
+import com.example.tradeLedger.entity.SharedStrategyConfig;
 import com.example.tradeLedger.entity.StrategyTemplate;
 import com.example.tradeLedger.entity.Symbol;
+import com.example.tradeLedger.entity.TradingAccount;
 import com.example.tradeLedger.entity.User;
+import com.example.tradeLedger.entity.UserBroker;
 import com.example.tradeLedger.entity.UserStrategy;
 import com.example.tradeLedger.entity.UserStrategyIndicator;
-import com.example.tradeLedger.entity.UserStrategyParameter;
 import com.example.tradeLedger.exception.ResourceConflictException;
 import com.example.tradeLedger.exception.ResourceNotFoundException;
 import com.example.tradeLedger.exception.StrategyValidationException;
-import com.example.tradeLedger.repository.IndicatorParameterLinkRepository;
-import com.example.tradeLedger.repository.ParameterRepository;
-import com.example.tradeLedger.repository.StrategyIndicatorLinkRepository;
-import com.example.tradeLedger.repository.StrategyParamDefinitionRepository;
-import com.example.tradeLedger.repository.StrategyParameterLinkRepository;
+import com.example.tradeLedger.indicator.IndicatorResolver;
+import com.example.tradeLedger.repository.IndicatorRepository;
+import com.example.tradeLedger.repository.StrategySubscriptionRepository;
 import com.example.tradeLedger.repository.StrategyTemplateRepository;
+import com.example.tradeLedger.repository.TradingAccountRepository;
+import com.example.tradeLedger.repository.UserBrokerRepository;
 import com.example.tradeLedger.repository.UserStrategyIndicatorRepository;
-import com.example.tradeLedger.repository.UserStrategyParameterRepository;
 import com.example.tradeLedger.repository.UserStrategyRepository;
 import com.example.tradeLedger.service.CurrentUserService;
-import com.example.tradeLedger.service.StrategySubscriptionService;
+import com.example.tradeLedger.service.SharedStrategyConfigService;
 import com.example.tradeLedger.service.UserStrategyService;
-import com.example.tradeLedger.serviceImpl.StrategyParamValidator.ValidatedParams;
 import com.example.tradeLedger.utils.JsonSupport;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -47,7 +44,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
+import java.util.TreeMap;
 import java.util.UUID;
 
 @Service
@@ -60,45 +57,48 @@ public class UserStrategyServiceImpl implements UserStrategyService {
     private final CurrentUserService currentUserService;
     private final UserStrategyRepository userStrategyRepository;
     private final UserStrategyIndicatorRepository indicatorRowRepository;
-    private final UserStrategyParameterRepository overrideRepository;
     private final StrategyTemplateRepository templateRepository;
-    private final StrategyIndicatorLinkRepository strategyIndicatorRepository;
-    private final IndicatorParameterLinkRepository indicatorParameterRepository;
-    private final StrategyParameterLinkRepository strategyParameterRepository;
-    private final StrategyParamDefinitionRepository paramDefRepository;
-    private final ParameterRepository parameterRepository;
-    private final StrategySubscriptionService subscriptionService;
-    private final StrategyParamValidator paramValidator;
+    private final IndicatorRepository indicatorRepository;
+    private final StrategySubscriptionRepository subscriptionRepository;
+    private final TradingAccountRepository tradingAccountRepository;
+    private final UserBrokerRepository userBrokerRepository;
+    private final SharedStrategyConfigService sharedConfigService;
+    private final SubscriptionFanOut fanOut;
+    private final IndicatorParams indicatorParams;
+    private final UserStrategyValidator validator;
     private final SymbolResolver symbolResolver;
+    private final RuleTrees ruleTrees;
     private final JsonSupport json;
 
     public UserStrategyServiceImpl(CurrentUserService currentUserService,
                                    UserStrategyRepository userStrategyRepository,
                                    UserStrategyIndicatorRepository indicatorRowRepository,
-                                   UserStrategyParameterRepository overrideRepository,
                                    StrategyTemplateRepository templateRepository,
-                                   StrategyIndicatorLinkRepository strategyIndicatorRepository,
-                                   IndicatorParameterLinkRepository indicatorParameterRepository,
-                                   StrategyParameterLinkRepository strategyParameterRepository,
-                                   StrategyParamDefinitionRepository paramDefRepository,
-                                   ParameterRepository parameterRepository,
-                                   StrategySubscriptionService subscriptionService,
-                                   StrategyParamValidator paramValidator,
+                                   IndicatorRepository indicatorRepository,
+                                   StrategySubscriptionRepository subscriptionRepository,
+                                   TradingAccountRepository tradingAccountRepository,
+                                   UserBrokerRepository userBrokerRepository,
+                                   SharedStrategyConfigService sharedConfigService,
+                                   SubscriptionFanOut fanOut,
+                                   IndicatorParams indicatorParams,
+                                   UserStrategyValidator validator,
                                    SymbolResolver symbolResolver,
+                                   RuleTrees ruleTrees,
                                    JsonSupport json) {
         this.currentUserService = currentUserService;
         this.userStrategyRepository = userStrategyRepository;
         this.indicatorRowRepository = indicatorRowRepository;
-        this.overrideRepository = overrideRepository;
         this.templateRepository = templateRepository;
-        this.strategyIndicatorRepository = strategyIndicatorRepository;
-        this.indicatorParameterRepository = indicatorParameterRepository;
-        this.strategyParameterRepository = strategyParameterRepository;
-        this.paramDefRepository = paramDefRepository;
-        this.parameterRepository = parameterRepository;
-        this.subscriptionService = subscriptionService;
-        this.paramValidator = paramValidator;
+        this.indicatorRepository = indicatorRepository;
+        this.subscriptionRepository = subscriptionRepository;
+        this.tradingAccountRepository = tradingAccountRepository;
+        this.userBrokerRepository = userBrokerRepository;
+        this.sharedConfigService = sharedConfigService;
+        this.fanOut = fanOut;
+        this.indicatorParams = indicatorParams;
+        this.validator = validator;
         this.symbolResolver = symbolResolver;
+        this.ruleTrees = ruleTrees;
         this.json = json;
     }
 
@@ -128,49 +128,48 @@ public class UserStrategyServiceImpl implements UserStrategyService {
     @Override
     @Transactional(readOnly = true)
     public UserStrategyResponse get(String email, UUID id) {
-        User user = currentUserService.require(email);
-        return toResponse(requireOwned(user, id));
+        return toResponse(requireOwned(currentUserService.require(email), id));
     }
 
     @Override
     @Transactional(readOnly = true)
     public UserStrategyRuntimeResponse runtime(String email, UUID id) {
-        User user = currentUserService.require(email);
-        UserStrategy userStrategy = requireOwned(user, id);
-        StrategyTemplate template = userStrategy.getStrategy();
-
-        // Validated rather than raw: the same coercion the engine applies, so the
-        // bot gets 9 as a number and 5m as a timeframe, not whatever text happens
-        // to sit in custom_value.
-        ValidatedParams params = validateEffective(userStrategy);
+        UserStrategy strategy = requireOwned(currentUserService.require(email), id);
+        StrategyTemplate template = strategy.getStrategy();
 
         List<UserStrategyRuntimeResponse.Indicator> indicators = new ArrayList<>();
-        for (UserStrategyIndicator row : indicatorRows(userStrategy)) {
-            if (!row.isEnabled()) {
-                continue;
+        for (UserStrategyIndicator row : indicatorRows(strategy)) {
+            if (row.isEnabled()) {
+                indicators.add(new UserStrategyRuntimeResponse.Indicator(
+                        row.getIndicator().getId(), row.getIndicator().getName(), row.getSlot(),
+                        json.toMap(row.getParams())));
             }
-            Map<String, String> values = new LinkedHashMap<>();
-            for (EffectiveParameterResponse knob : indicatorKnobs(userStrategy, row)) {
-                values.put(knob.code(), knob.effectiveValue());
-            }
-            indicators.add(new UserStrategyRuntimeResponse.Indicator(
-                    row.getIndicator().getId(), row.getIndicator().getName(), row.getSlot(), values));
         }
 
-        Symbol symbol = userStrategy.getSymbol();
+        Symbol symbol = strategy.getSymbol();
+        SharedStrategyConfig config = strategy.getSharedConfig();
         return new UserStrategyRuntimeResponse(
-                userStrategy.getId(),
-                userStrategy.getUser().getId(),
+                strategy.getId(),
+                strategy.getUser().getId(),
                 template.getId(),
                 template.getName(),
                 template.getRuleTree(),
                 symbol != null ? symbol.getId() : null,
                 symbol != null ? symbol.getSymbol() : null,
-                userStrategy.getTimeframe(),
-                userStrategy.isActive(),
+                strategy.getCandleDuration(),
+                strategy.getTriggerDuration(),
+                strategy.isActive(),
                 indicators,
-                params.getSignal(),
-                params.getExecution());
+                strategy.getDerivative().name(),
+                validator.legs(strategy),
+                strategy.getLotRule().name(),
+                strategy.getBaseLot(),
+                strategy.getAveragingCount(),
+                strategy.getSlPct(),
+                strategy.getTpPct(),
+                signalParams(strategy),
+                config != null ? config.getId() : null,
+                config != null ? config.getConfigHash() : null);
     }
 
     // --------------------------------------------------------------- create
@@ -188,53 +187,48 @@ public class UserStrategyServiceImpl implements UserStrategyService {
             throw new StrategyValidationException("Strategy template is not active: " + template.getName());
         }
 
-        // Defaulting to the template's own name makes "save this as-is" a one-field
-        // request; the second customization of the same template has to be named.
+        // Defaulting to the template name makes "save this as-is" a one-field
+        // request; the second strategy from the same template has to be named.
         String name = normalizeName(request.getName(), template.getName());
         requireNameFree(user, name, null);
 
-        UserStrategy userStrategy = new UserStrategy();
-        userStrategy.setUser(user);
-        userStrategy.setStrategy(template);
-        userStrategy.setName(name);
-        userStrategy.setDescription(trimToNull(request.getDescription()));
-        userStrategy.setSymbol(symbolResolver.resolveOrNull(
-                request.getSymbolId(), request.getSymbol(), request.getExchangeCode()));
-        userStrategy.setTimeframe(Timeframes.normalizeOrNull(request.getTimeframe()));
-        userStrategy.setActive(true);
-        userStrategyRepository.save(userStrategy);
+        UserStrategy strategy = new UserStrategy();
+        strategy.setUser(user);
+        strategy.setStrategy(template);
+        strategy.setName(name);
+        strategy.setActive(true);
+        userStrategyRepository.save(strategy);
 
-        seedIndicatorRows(userStrategy, template);
-        applyOverrides(userStrategy, request.getOverrides());
-        validateEffective(userStrategy);
+        seedIndicatorRows(strategy, template);
+        applyRequest(strategy, request);
 
-        log.info("CREATE user strategy '{}' from template '{}' overrides={} | user={}",
-                name, template.getName(),
-                request.getOverrides() == null ? 0 : request.getOverrides().size(), email);
-
-        return toResponse(userStrategy);
+        log.info("CREATE strategy {} from template {} | user={}", name, template.getName(), email);
+        return toResponse(strategy);
     }
 
     /**
-     * Mirrors the template's indicator set onto the user strategy, one row per
-     * indicator the template declares.
+     * Mirrors the template indicator set onto the strategy, one row per indicator
+     * the rule tree names, each starting on its schema defaults.
      *
-     * Read from {@code strategy_indicator_links} but stored as a foreign key to
-     * {@code indicators}: that index is rebuilt from the rule tree on every
-     * template save, and user rows must not depend on a table that regenerates.
+     * Read from the rule tree directly rather than from an index table beside it.
+     * The tree is the only declaration of what a template uses, so deriving it
+     * here is the only way the two can never disagree.
      */
-    private void seedIndicatorRows(UserStrategy userStrategy, StrategyTemplate template) {
-        List<StrategyIndicatorLink> links =
-                strategyIndicatorRepository.findByStrategy_IdOrderByIndicator_NameAsc(template.getId());
+    private void seedIndicatorRows(UserStrategy strategy, StrategyTemplate template) {
         int order = 0;
-        for (StrategyIndicatorLink link : links) {
+        for (String name : IndicatorResolver.indicatorNames(json.readTree(template.getRuleTree()))) {
+            Indicator indicator = indicatorRepository.findByName(name).orElseThrow(() ->
+                    new StrategyValidationException("Template " + template.getName()
+                            + " references unknown indicator " + name
+                            + " - the template cannot be used until its catalog entry exists"));
+
             UserStrategyIndicator row = new UserStrategyIndicator();
-            row.setUserStrategy(userStrategy);
-            row.setIndicator(link.getIndicator());
+            row.setUserStrategy(strategy);
+            row.setIndicator(indicator);
             row.setEnabled(true);
             row.setDisplayOrder(order++);
+            row.setParams(json.toJson(indicatorParams.defaults(indicator)));
             indicatorRowRepository.save(row);
-            userStrategy.getIndicators().add(row);
         }
     }
 
@@ -242,241 +236,165 @@ public class UserStrategyServiceImpl implements UserStrategyService {
 
     @Override
     @Transactional
-    public UserStrategyResponse update(String email, UUID id, UserStrategyUpdateRequest request) {
+    public UserStrategyResponse update(String email, UUID id, UserStrategyRequest request) {
         User user = currentUserService.require(email);
-        UserStrategy userStrategy = requireOwned(user, id);
+        UserStrategy strategy = requireOwned(user, id);
         if (request == null) {
             throw new StrategyValidationException("Request body is required");
         }
-
         if (request.getName() != null) {
-            String name = normalizeName(request.getName(), userStrategy.getStrategy().getName());
-            requireNameFree(user, name, userStrategy.getId());
-            userStrategy.setName(name);
+            String name = normalizeName(request.getName(), strategy.getStrategy().getName());
+            requireNameFree(user, name, strategy.getId());
+            strategy.setName(name);
         }
+        applyRequest(strategy, request);
+
+        log.info("UPDATE strategy={} | user={}", id, email);
+        return toResponse(strategy);
+    }
+
+    /**
+     * Applies every present field, then validates and re-resolves once.
+     *
+     * One pass at the end rather than a check per setter: a leg cannot be judged
+     * without knowing the derivative, and the shared config cannot be resolved
+     * until every indicator value is settled.
+     */
+    private void applyRequest(UserStrategy strategy, UserStrategyRequest request) {
         if (request.getDescription() != null) {
-            userStrategy.setDescription(trimToNull(request.getDescription()));
+            strategy.setDescription(trimToNull(request.getDescription()));
         }
         Symbol symbol = symbolResolver.resolveOrNull(
                 request.getSymbolId(), request.getSymbol(), request.getExchangeCode());
         if (symbol != null) {
-            userStrategy.setSymbol(symbol);
+            strategy.setSymbol(symbol);
         }
-        String timeframe = Timeframes.normalizeOrNull(request.getTimeframe());
-        if (timeframe != null) {
-            userStrategy.setTimeframe(timeframe);
+        String candle = Timeframes.normalizeOrNull(request.getCandleDuration());
+        if (candle != null) {
+            strategy.setCandleDuration(candle);
+        }
+        String trigger = Timeframes.normalizeOrNull(request.getTriggerDuration());
+        if (trigger != null) {
+            strategy.setTriggerDuration(trigger);
+        }
+
+        Derivative derivative =
+                UserStrategyValidator.parse(Derivative.class, request.getDerivative(), "derivative");
+        if (derivative != null) {
+            strategy.setDerivative(derivative);
+        }
+        applySide(strategy, request, true);
+        applySide(strategy, request, false);
+
+        LotRule lotRule = UserStrategyValidator.parse(LotRule.class, request.getLotRule(), "lotRule");
+        if (lotRule != null) {
+            strategy.setLotRule(lotRule);
+        }
+        if (request.getBaseLot() != null) {
+            strategy.setBaseLot(request.getBaseLot());
+        }
+        if (request.getAveragingCount() != null) {
+            strategy.setAveragingCount(request.getAveragingCount());
+        }
+        if (request.getSlPct() != null) {
+            strategy.setSlPct(request.getSlPct());
+        }
+        if (request.getTpPct() != null) {
+            strategy.setTpPct(request.getTpPct());
         }
         if (request.getActive() != null) {
-            userStrategy.setActive(request.getActive());
+            strategy.setActive(request.getActive());
         }
 
-        if (request.getIndicators() != null) {
-            for (UserStrategyUpdateRequest.IndicatorToggle toggle : request.getIndicators()) {
-                if (toggle == null || toggle.getEnabled() == null) {
-                    continue;
-                }
-                UserStrategyIndicator row = resolveIndicatorRow(userStrategy,
-                        toggle.getUserStrategyIndicatorId(), toggle.getIndicatorId(), toggle.getSlot());
-                row.setEnabled(toggle.getEnabled());
-                indicatorRowRepository.save(row);
-            }
-        }
+        applyIndicatorTuning(strategy, request.getIndicators());
 
-        applyOverrides(userStrategy, request.getOverrides());
-        userStrategyRepository.save(userStrategy);
-        validateEffective(userStrategy);
-
-        log.info("UPDATE user strategy={} overrides={} | user={}",
-                id, request.getOverrides() == null ? 0 : request.getOverrides().size(), email);
-
-        return toResponse(userStrategy);
+        validator.validate(strategy);
+        resolveSharedConfig(strategy);
+        userStrategyRepository.save(strategy);
     }
 
-    // --------------------------------------------------------------- delete
+    /** The two sides differ only in which triple of columns they touch. */
+    private void applySide(UserStrategy strategy, UserStrategyRequest request, boolean call) {
+        Boolean enabled = call ? request.getCeEnabled() : request.getPeEnabled();
+        String moneynessText = call ? request.getCeMoneyness() : request.getPeMoneyness();
+        Integer offset = call ? request.getCeStrikeOffset() : request.getPeStrikeOffset();
+        String field = call ? "ceMoneyness" : "peMoneyness";
 
-    @Override
-    @Transactional
-    public void delete(String email, UUID id) {
-        User user = currentUserService.require(email);
-        UserStrategy userStrategy = requireOwned(user, id);
-        // The indicator rows and overrides cascade; nothing global is touched, and
-        // a subscription already made from this row keeps running.
-        userStrategyRepository.delete(userStrategy);
-        log.info("DELETE user strategy={} '{}' | user={}", id, userStrategy.getName(), email);
+        Moneyness moneyness = UserStrategyValidator.parse(Moneyness.class, moneynessText, field);
+
+        if (call) {
+            if (enabled != null) strategy.setCeEnabled(enabled);
+            if (moneyness != null) strategy.setCeMoneyness(moneyness);
+            if (offset != null) strategy.setCeStrikeOffset(offset);
+            // Naming a moneyness is how a side is turned on: nobody sends
+            // ceMoneyness=OTM meaning "but leave the call side off".
+            if (moneyness != null && enabled == null) strategy.setCeEnabled(true);
+        } else {
+            if (enabled != null) strategy.setPeEnabled(enabled);
+            if (moneyness != null) strategy.setPeMoneyness(moneyness);
+            if (offset != null) strategy.setPeStrikeOffset(offset);
+            if (moneyness != null && enabled == null) strategy.setPeEnabled(true);
+        }
     }
 
-    // ------------------------------------------------------------ subscribe
+    // ------------------------------------------------------------ indicators
 
-    @Override
-    @Transactional
-    public StrategySubscriptionResponse subscribe(String email, UUID id,
-                                                  UserStrategySubscribeRequest request) {
-        User user = currentUserService.require(email);
-        UserStrategy userStrategy = requireOwned(user, id);
-        if (request == null) {
-            throw new StrategyValidationException("Request body is required");
-        }
-        if (!userStrategy.isActive()) {
-            throw new StrategyValidationException(
-                    "User strategy '" + userStrategy.getName() + "' is archived; reactivate it before subscribing");
-        }
-
-        Symbol symbol = Optional.ofNullable(symbolResolver.resolveOrNull(
-                        request.getSymbolId(), request.getSymbol(), request.getExchangeCode()))
-                .orElse(userStrategy.getSymbol());
-        if (symbol == null) {
-            throw new StrategyValidationException("This user strategy has no symbol; "
-                    + "send symbolId, or symbol + exchangeCode, to subscribe it");
-        }
-        String timeframe = Optional.ofNullable(Timeframes.normalizeOrNull(request.getTimeframe()))
-                .orElse(userStrategy.getTimeframe());
-        if (timeframe == null) {
-            throw new StrategyValidationException("This user strategy has no timeframe; "
-                    + "send timeframe to subscribe it");
-        }
-
-        StrategySubscriptionRequest subscribe = new StrategySubscriptionRequest();
-        subscribe.setStrategyId(userStrategy.getStrategy().getId());
-        subscribe.setSymbolId(symbol.getId());
-        subscribe.setTimeframe(timeframe);
-        // The relational rows are the source of truth; this is the projection into
-        // the flat map the execution path already consumes, which is what keeps the
-        // config hash and the dedup working unchanged.
-        subscribe.setParams(new LinkedHashMap<>(effectiveValuesByCode(userStrategy)));
-        subscribe.setTradingAccountId(request.getTradingAccountId());
-        subscribe.setRiskProfileId(request.getRiskProfileId());
-        subscribe.setQuantity(request.getQuantity());
-        subscribe.setMultiplier(request.getMultiplier());
-        subscribe.setLotSize(request.getLotSize());
-        subscribe.setCapitalAllocated(request.getCapitalAllocated());
-        subscribe.setExecutionMode(request.getExecutionMode());
-        subscribe.setTradeMode(request.getTradeMode());
-
-        log.info("SUBSCRIBE from user strategy={} '{}' {} {} | user={}",
-                id, userStrategy.getName(), symbol.getSymbol(), timeframe, email);
-
-        // Delegated rather than reimplemented: dedup, the per-account uniqueness
-        // rule and the instance lifecycle all live on the subscription path.
-        return subscriptionService.create(email, subscribe);
-    }
-
-    // ------------------------------------------------------------ overrides
-
-    private void applyOverrides(UserStrategy userStrategy, List<ParameterOverrideRequest> overrides) {
-        if (overrides == null) {
+    private void applyIndicatorTuning(UserStrategy strategy,
+                                      List<UserStrategyRequest.IndicatorTuning> tunings) {
+        if (tunings == null) {
             return;
         }
-        for (ParameterOverrideRequest override : overrides) {
-            if (override == null) {
+        for (UserStrategyRequest.IndicatorTuning tuning : tunings) {
+            if (tuning == null) {
                 continue;
             }
-            if (override.getParameterId() == null) {
-                throw new StrategyValidationException("parameterId is required on every override");
+            UserStrategyIndicator row = resolveIndicatorRow(strategy, tuning);
+            if (tuning.getEnabled() != null) {
+                row.setEnabled(tuning.getEnabled());
             }
-            Parameter parameter = parameterRepository.findById(override.getParameterId())
-                    .orElseThrow(() -> ResourceNotFoundException.of("Parameter", override.getParameterId()));
-
-            boolean indicatorScoped =
-                    override.getUserStrategyIndicatorId() != null || override.getIndicatorId() != null;
-            if (indicatorScoped) {
-                applyIndicatorOverride(userStrategy, override, parameter);
-            } else {
-                applyStrategyOverride(userStrategy, override, parameter);
+            if (tuning.getParams() != null) {
+                // Merged over what is stored, so sending one key changes one key.
+                Map<String, Object> merged = new LinkedHashMap<>(json.toMap(row.getParams()));
+                merged.putAll(tuning.getParams());
+                row.setParams(json.toJson(indicatorParams.effective(row.getIndicator(), merged)));
             }
+            indicatorRowRepository.save(row);
         }
     }
 
-    private void applyIndicatorOverride(UserStrategy userStrategy, ParameterOverrideRequest override,
-                                        Parameter parameter) {
-        UserStrategyIndicator row = resolveIndicatorRow(userStrategy,
-                override.getUserStrategyIndicatorId(), override.getIndicatorId(), override.getSlot());
-
-        // The knob has to be one this indicator actually declares. Without this a
-        // caller could pin 'sl' onto EMA and the value would resolve against
-        // nothing, silently doing nothing at run time.
-        IndicatorParameterLink link = indicatorParameterRepository
-                .findByIndicator_IdAndParameter_Id(row.getIndicator().getId(), parameter.getId())
-                .orElseThrow(() -> new StrategyValidationException("Parameter '" + parameter.getCode()
-                        + "' does not belong to indicator '" + row.getIndicator().getName() + "'"));
-
-        UserStrategyParameter existing = overrideRepository
-                .findByUserStrategyIndicator_IdAndParameter_Id(row.getId(), parameter.getId())
-                .orElse(null);
-
-        if (override.getValue() == null) {
-            clear(userStrategy, existing);
-            return;
-        }
-        UserStrategyParameter stored = existing != null ? existing : new UserStrategyParameter();
-        stored.setUserStrategy(userStrategy);
-        stored.setUserStrategyIndicator(row);
-        stored.setParameter(parameter);
-        stored.setIndicatorParameterLink(link);
-        stored.setCustomValue(override.getValue().trim());
-        overrideRepository.save(stored);
-        if (existing == null) {
-            userStrategy.getParameters().add(stored);
-        }
-    }
-
-    private void applyStrategyOverride(UserStrategy userStrategy, ParameterOverrideRequest override,
-                                       Parameter parameter) {
-        UUID templateId = userStrategy.getStrategy().getId();
-        if (!strategyParameterRepository.existsByStrategy_IdAndParameter_Id(templateId, parameter.getId())) {
-            throw new StrategyValidationException("Parameter '" + parameter.getCode()
-                    + "' does not belong to strategy '" + userStrategy.getStrategy().getName()
-                    + "'. Send indicatorId if it is an indicator knob.");
+    private UserStrategyIndicator resolveIndicatorRow(UserStrategy strategy,
+                                                      UserStrategyRequest.IndicatorTuning tuning) {
+        if (tuning.getUserStrategyIndicatorId() != null) {
+            return indicatorRowRepository
+                    .findByIdAndUserStrategy_Id(tuning.getUserStrategyIndicatorId(), strategy.getId())
+                    .orElseThrow(() -> ResourceNotFoundException.of(
+                            "Indicator on this strategy", tuning.getUserStrategyIndicatorId()));
         }
 
-        UserStrategyParameter existing = overrideRepository
-                .findByUserStrategy_IdAndParameter_IdAndUserStrategyIndicatorIsNull(
-                        userStrategy.getId(), parameter.getId())
-                .orElse(null);
-
-        if (override.getValue() == null) {
-            clear(userStrategy, existing);
-            return;
-        }
-        UserStrategyParameter stored = existing != null ? existing : new UserStrategyParameter();
-        stored.setUserStrategy(userStrategy);
-        stored.setUserStrategyIndicator(null);
-        stored.setParameter(parameter);
-        stored.setIndicatorParameterLink(null);
-        stored.setCustomValue(override.getValue().trim());
-        overrideRepository.save(stored);
-        if (existing == null) {
-            userStrategy.getParameters().add(stored);
-        }
-    }
-
-    /** Clearing is a delete, not a null value: the knob has to fall back to the global default. */
-    private void clear(UserStrategy userStrategy, UserStrategyParameter existing) {
-        if (existing == null) {
-            return;
-        }
-        userStrategy.getParameters().remove(existing);
-        overrideRepository.delete(existing);
-    }
-
-    private UserStrategyIndicator resolveIndicatorRow(UserStrategy userStrategy, UUID rowId,
-                                                      UUID indicatorId, String slot) {
-        if (rowId != null) {
-            return indicatorRowRepository.findByIdAndUserStrategy_Id(rowId, userStrategy.getId())
-                    .orElseThrow(() -> ResourceNotFoundException.of("User strategy indicator", rowId));
+        UUID indicatorId = tuning.getIndicatorId();
+        if (indicatorId == null && tuning.getIndicatorName() != null) {
+            String name = tuning.getIndicatorName().trim().toUpperCase(java.util.Locale.ROOT);
+            indicatorId = indicatorRepository.findByName(name)
+                    .orElseThrow(() -> ResourceNotFoundException.of("Indicator", name))
+                    .getId();
         }
         if (indicatorId == null) {
-            throw new StrategyValidationException("userStrategyIndicatorId or indicatorId is required");
+            throw new StrategyValidationException(
+                    "userStrategyIndicatorId, indicatorId or indicatorName is required on every indicator entry");
         }
-        if (slot != null && !slot.isBlank()) {
+
+        String slot = tuning.getSlot() == null || tuning.getSlot().isBlank() ? null : tuning.getSlot().trim();
+        if (slot != null) {
+            UUID id = indicatorId;
             return indicatorRowRepository
-                    .findByUserStrategy_IdAndIndicator_IdAndSlot(userStrategy.getId(), indicatorId, slot.trim())
+                    .findByUserStrategy_IdAndIndicator_IdAndSlot(strategy.getId(), indicatorId, slot)
                     .orElseThrow(() -> ResourceNotFoundException.of(
-                            "Indicator slot '" + slot + "' on this user strategy", indicatorId));
+                            "Indicator slot " + slot + " on this strategy", id));
         }
         List<UserStrategyIndicator> matches =
-                indicatorRowRepository.findByUserStrategy_IdAndIndicator_Id(userStrategy.getId(), indicatorId);
+                indicatorRowRepository.findByUserStrategy_IdAndIndicator_Id(strategy.getId(), indicatorId);
         if (matches.isEmpty()) {
-            throw ResourceNotFoundException.of("Indicator on this user strategy", indicatorId);
+            throw ResourceNotFoundException.of("Indicator on this strategy", indicatorId);
         }
         if (matches.size() > 1) {
             // Only reachable once a template uses one indicator more than once.
@@ -486,131 +404,247 @@ public class UserStrategyServiceImpl implements UserStrategyService {
         return matches.get(0);
     }
 
-    // ------------------------------------------------------- effective values
+    /**
+     * Every enabled indicator values, unioned and sorted - the entire input to the
+     * config hash.
+     *
+     * A key reachable through two indicators appears once: the rule tree binds
+     * {@code $k} to one value, so two indicators declaring {@code k} are asking for
+     * the same number, and hashing it twice would be the same hash anyway.
+     */
+    private Map<String, Object> signalParams(UserStrategy strategy) {
+        Map<String, Object> params = new TreeMap<>();
+        for (UserStrategyIndicator row : indicatorRows(strategy)) {
+            if (row.isEnabled()) {
+                json.toMap(row.getParams()).forEach(params::putIfAbsent);
+            }
+        }
+        return params;
+    }
+
+    // ------------------------------------------------------------ dedup unit
 
     /**
-     * Every knob in force, keyed by {@code parameters.code}.
+     * Points the strategy at the shared computation its current configuration
+     * comes to, creating it only if nobody already runs that exact math.
      *
-     * Indicator knobs first, then strategy knobs, first writer wins - the same
-     * order and the same collapse-by-code rule
-     * {@link StrategyParameterLinkSync#desiredDefs} uses to derive
-     * {@code strategy_param_definitions}. That the two agree is what lets the
-     * existing validator and config hash consume this map unchanged.
+     * The previous one is retired when its last active deployment leaves, so
+     * lineage survives a retune and an abandoned computation stops being scheduled.
      */
-    private Map<String, String> effectiveValuesByCode(UserStrategy userStrategy) {
-        Map<String, String> values = new LinkedHashMap<>();
-        for (UserStrategyIndicator row : indicatorRows(userStrategy)) {
-            if (!row.isEnabled()) {
+    private void resolveSharedConfig(UserStrategy strategy) {
+        if (strategy.getSymbol() == null || strategy.getCandleDuration() == null) {
+            return;
+        }
+        Map<String, Object> signal = signalParams(strategy);
+        ruleTrees.assertResolves(strategy.getStrategy(), signal);
+
+        SharedStrategyConfig previous = strategy.getSharedConfig();
+        SharedStrategyConfigService.Resolution resolution = sharedConfigService.resolveOrCreate(
+                strategy.getStrategy(), strategy.getSymbol(), strategy.getCandleDuration(), signal);
+        SharedStrategyConfig target = resolution.instance();
+
+        if (previous != null && previous.getId().equals(target.getId())) {
+            return;
+        }
+        // Lineage: a computation created by this retune records what it replaced,
+        // so a retired one can still be traced back from the row that took over.
+        if (previous != null && resolution.created() && target.getSupersedes() == null) {
+            target.setSupersedes(previous);
+        }
+        strategy.setSharedConfig(target);
+        userStrategyRepository.save(strategy);
+        if (previous != null) {
+            sharedConfigService.retireIfOrphaned(previous.getId());
+            log.info("REPOINT strategy={} instance {} -> {} ({})", strategy.getId(),
+                    previous.getId(), target.getId(), resolution.created() ? "new" : "shared");
+        }
+    }
+
+    // --------------------------------------------------------------- delete
+
+    @Override
+    @Transactional
+    public void delete(String email, UUID id) {
+        User user = currentUserService.require(email);
+        UserStrategy strategy = requireOwned(user, id);
+
+        // Deployments hold a FK to this row, so a live one has to be withdrawn
+        // first - a cascade here would silently stop trading on every broker.
+        long deployments = subscriptionRepository.countByUserStrategy_Id(id);
+        if (deployments > 0) {
+            throw new ResourceConflictException("Strategy " + strategy.getName() + " is deployed on "
+                    + deployments + " account(s). Withdraw those deployments first, or archive it with "
+                    + "PUT /api/v1/my-strategies/" + id + " {\"active\":false}.");
+        }
+
+        SharedStrategyConfig config = strategy.getSharedConfig();
+        userStrategyRepository.delete(strategy);
+        userStrategyRepository.flush();
+        if (config != null) {
+            sharedConfigService.retireIfOrphaned(config.getId());
+        }
+        log.info("DELETE strategy={} {} | user={}", id, strategy.getName(), email);
+    }
+
+    // --------------------------------------------------------------- deploy
+
+    @Override
+    @Transactional(readOnly = true)
+    public StrategyDeploymentResponse deploy(String email, UUID id, StrategyDeployRequest request) {
+        User user = currentUserService.require(email);
+        UserStrategy strategy = requireOwned(user, id);
+        if (request == null || request.getTargets() == null || request.getTargets().isEmpty()) {
+            throw new StrategyValidationException("targets is required and must name at least one account");
+        }
+        if (!strategy.isActive()) {
+            throw new StrategyValidationException("Strategy " + strategy.getName()
+                    + " is archived; reactivate it before deploying");
+        }
+        if (!strategy.isDeployable()) {
+            throw new StrategyValidationException("Strategy " + strategy.getName()
+                    + " has no market yet - set symbol and candleDuration before deploying");
+        }
+
+        List<Destination> destinations = expand(user, request);
+        List<StrategyDeploymentResponse.Item> results = new ArrayList<>(destinations.size());
+        int deployed = 0;
+
+        for (Destination destination : destinations) {
+            try {
+                // Its own transaction: a rejected account must not roll back the
+                // accounts that already succeeded.
+                StrategySubscriptionResponse subscription =
+                        fanOut.deployOne(email, toSubscriptionRequest(id, destination));
+                deployed++;
+                results.add(item(destination, StrategyDeploymentResponse.STATUS_DEPLOYED, subscription, null));
+            } catch (RuntimeException e) {
+                log.warn("DEPLOY strategy={} account={} failed: {}",
+                        id, destination.account().getId(), e.getMessage());
+                results.add(item(destination, StrategyDeploymentResponse.STATUS_FAILED, null, e.getMessage()));
+            }
+        }
+
+        Symbol symbol = strategy.getSymbol();
+        SharedStrategyConfig config = strategy.getSharedConfig();
+        log.info("DEPLOY strategy={} {} to {} account(s): {} deployed, {} failed | user={}",
+                id, strategy.getName(), destinations.size(), deployed,
+                destinations.size() - deployed, email);
+
+        return new StrategyDeploymentResponse(
+                strategy.getId(),
+                strategy.getName(),
+                symbol.getId(),
+                symbol.getSymbol(),
+                strategy.getCandleDuration(),
+                config.getId(),
+                config.getConfigHash(),
+                destinations.size(),
+                deployed,
+                destinations.size() - deployed,
+                results);
+    }
+
+    /** One account and the settings resolved for it: target first, then request. */
+    private record Destination(TradingAccount account, UUID riskProfileId,
+                               java.math.BigDecimal multiplier, java.math.BigDecimal capitalAllocated,
+                               String executionMode, String tradeMode) {
+    }
+
+    /**
+     * Turns targets into accounts, resolving a broker setup into every account
+     * under it and rejecting an account named twice before anything is written.
+     */
+    private List<Destination> expand(User user, StrategyDeployRequest request) {
+        List<Destination> destinations = new ArrayList<>();
+        Map<UUID, String> seen = new LinkedHashMap<>();
+
+        for (StrategyDeployRequest.Target target : request.getTargets()) {
+            if (target == null) {
                 continue;
             }
-            for (EffectiveParameterResponse knob : indicatorKnobs(userStrategy, row)) {
-                values.putIfAbsent(knob.code(), knob.effectiveValue());
+            for (TradingAccount account : accountsFor(user, target)) {
+                String previous = seen.put(account.getId(), account.getAccountName());
+                if (previous != null) {
+                    throw new StrategyValidationException("Account " + previous
+                            + " is named twice in targets - a strategy is deployed on an account once");
+                }
+                destinations.add(new Destination(
+                        account,
+                        first(target.getRiskProfileId(), request.getRiskProfileId()),
+                        first(target.getMultiplier(), request.getMultiplier()),
+                        first(target.getCapitalAllocated(), request.getCapitalAllocated()),
+                        first(target.getExecutionMode(), request.getExecutionMode()),
+                        first(target.getTradeMode(), request.getTradeMode())));
             }
         }
-        for (EffectiveParameterResponse knob : strategyKnobs(userStrategy)) {
-            values.putIfAbsent(knob.code(), knob.effectiveValue());
+        if (destinations.isEmpty()) {
+            throw new StrategyValidationException("targets named no usable trading account");
         }
-        return values;
+        return destinations;
     }
 
-    /**
-     * Runs the effective values through the engine's own validator.
-     *
-     * This is where a bad override is caught - type, range, and the cross-field
-     * rules a single value cannot check on its own, like {@code d > k}. It also
-     * returns the signal / execution split, so validation and the projection the
-     * bot and the subscribe path need are one pass rather than two.
-     */
-    private ValidatedParams validateEffective(UserStrategy userStrategy) {
-        Map<String, Object> submitted = new LinkedHashMap<>(effectiveValuesByCode(userStrategy));
-        return paramValidator.validate(
-                paramDefRepository.findByStrategy_IdOrderByDisplayOrderAscParameterKeyAsc(
-                        userStrategy.getStrategy().getId()),
-                submitted);
-    }
-
-    private List<UserStrategyIndicator> indicatorRows(UserStrategy userStrategy) {
-        return indicatorRowRepository.findByUserStrategy_IdOrderByDisplayOrderAsc(userStrategy.getId());
-    }
-
-    /** Indexed once per read so resolving N knobs is not N queries. */
-    private Map<String, UserStrategyParameter> overridesByKey(UserStrategy userStrategy) {
-        Map<String, UserStrategyParameter> byKey = new LinkedHashMap<>();
-        for (UserStrategyParameter override : overrideRepository.findByUserStrategy_Id(userStrategy.getId())) {
-            byKey.put(overrideKey(
-                    override.isIndicatorScoped() ? override.getUserStrategyIndicator().getId() : null,
-                    override.getParameter().getId()), override);
+    private List<TradingAccount> accountsFor(User user, StrategyDeployRequest.Target target) {
+        if (target.getTradingAccountId() != null) {
+            return List.of(tradingAccountRepository
+                    .findByIdAndUser_Id(target.getTradingAccountId(), user.getId())
+                    .orElseThrow(() -> ResourceNotFoundException.of(
+                            "Trading account", target.getTradingAccountId())));
         }
-        return byKey;
-    }
-
-    private String overrideKey(UUID indicatorRowId, Long parameterId) {
-        return indicatorRowId + "#" + parameterId;
-    }
-
-    private List<EffectiveParameterResponse> indicatorKnobs(UserStrategy userStrategy,
-                                                            UserStrategyIndicator row) {
-        return indicatorKnobs(row, overridesByKey(userStrategy));
-    }
-
-    private List<EffectiveParameterResponse> indicatorKnobs(UserStrategyIndicator row,
-                                                            Map<String, UserStrategyParameter> overrides) {
-        List<EffectiveParameterResponse> knobs = new ArrayList<>();
-        List<IndicatorParameterLink> links = indicatorParameterRepository
-                .findByIndicator_IdOrderByDisplayOrderAscIdAsc(row.getIndicator().getId());
-        for (IndicatorParameterLink link : links) {
-            Parameter parameter = link.getParameter();
-            UserStrategyParameter override = overrides.get(overrideKey(row.getId(), parameter.getId()));
-            knobs.add(toKnob(parameter, link.effectiveDefault(), link.effectiveValidation(),
-                    override, link.isRequired(), link.getDisplayOrder(), link.getId()));
+        if (target.getUserBrokerId() != null) {
+            UserBroker broker = userBrokerRepository
+                    .findByIdAndUser_Id(target.getUserBrokerId(), user.getId())
+                    .orElseThrow(() -> ResourceNotFoundException.of(
+                            "Broker setup", target.getUserBrokerId()));
+            List<TradingAccount> accounts =
+                    tradingAccountRepository.findByUserBroker_IdOrderByAccountNameAsc(broker.getId());
+            if (accounts.isEmpty()) {
+                throw new StrategyValidationException("Broker setup " + broker.getLabel()
+                        + " has no trading accounts to deploy on");
+            }
+            return accounts;
         }
-        return knobs;
+        throw new StrategyValidationException(
+                "Every target needs a tradingAccountId or a userBrokerId");
     }
 
-    private List<EffectiveParameterResponse> strategyKnobs(UserStrategy userStrategy) {
-        return strategyKnobs(userStrategy, overridesByKey(userStrategy));
+    private StrategySubscriptionRequest toSubscriptionRequest(UUID userStrategyId, Destination destination) {
+        StrategySubscriptionRequest request = new StrategySubscriptionRequest();
+        request.setUserStrategyId(userStrategyId);
+        request.setTradingAccountId(destination.account().getId());
+        request.setRiskProfileId(destination.riskProfileId());
+        request.setMultiplier(destination.multiplier());
+        request.setCapitalAllocated(destination.capitalAllocated());
+        request.setExecutionMode(destination.executionMode());
+        request.setTradeMode(destination.tradeMode());
+        return request;
     }
 
-    private List<EffectiveParameterResponse> strategyKnobs(UserStrategy userStrategy,
-                                                           Map<String, UserStrategyParameter> overrides) {
-        List<EffectiveParameterResponse> knobs = new ArrayList<>();
-        List<StrategyParameterLink> links = strategyParameterRepository
-                .findByStrategy_IdOrderByDisplayOrderAscIdAsc(userStrategy.getStrategy().getId());
-        for (StrategyParameterLink link : links) {
-            Parameter parameter = link.getParameter();
-            UserStrategyParameter override = overrides.get(overrideKey(null, parameter.getId()));
-            knobs.add(toKnob(parameter, link.effectiveDefault(), link.effectiveValidation(),
-                    override, link.isRequired(), link.getDisplayOrder(), null));
-        }
-        return knobs;
+    private StrategyDeploymentResponse.Item item(Destination destination, String status,
+                                                 StrategySubscriptionResponse subscription, String error) {
+        UserBroker broker = destination.account().getUserBroker();
+        return new StrategyDeploymentResponse.Item(
+                destination.account().getId(),
+                destination.account().getAccountName(),
+                broker.getId(),
+                broker.getLabel(),
+                status,
+                subscription,
+                error);
     }
 
-    /** The three-level fallback, in one place: custom, else link default, else catalog default. */
-    private EffectiveParameterResponse toKnob(Parameter parameter, String linkDefault, String validation,
-                                              UserStrategyParameter override, boolean required,
-                                              int displayOrder, Long linkId) {
-        String custom = override != null ? override.getCustomValue() : null;
-        return new EffectiveParameterResponse(
-                parameter.getId(),
-                parameter.getCode(),
-                parameter.getName(),
-                parameter.getDataType(),
-                parameter.getScope(),
-                linkDefault,
-                custom,
-                custom != null ? custom : linkDefault,
-                custom != null,
-                json.toMap(validation),
-                required,
-                displayOrder,
-                linkId);
+    private static <T> T first(T preferred, T fallback) {
+        return preferred != null ? preferred : fallback;
     }
 
     // ------------------------------------------------------------ resolving
 
+    private List<UserStrategyIndicator> indicatorRows(UserStrategy strategy) {
+        return indicatorRowRepository.findByUserStrategy_IdOrderByDisplayOrderAsc(strategy.getId());
+    }
+
     private UserStrategy requireOwned(User user, UUID id) {
         return userStrategyRepository.findByIdAndUser_Id(id, user.getId())
-                .orElseThrow(() -> ResourceNotFoundException.of("User strategy", id));
+                .orElseThrow(() -> ResourceNotFoundException.of("Strategy", id));
     }
 
     private StrategyTemplate resolveTemplate(UUID strategyId, String strategyName) {
@@ -630,8 +664,8 @@ public class UserStrategyServiceImpl implements UserStrategyService {
         userStrategyRepository.findByUser_IdAndNameIgnoreCase(user.getId(), name)
                 .filter(other -> !other.getId().equals(selfId))
                 .ifPresent(other -> {
-                    throw new ResourceConflictException("You already have a strategy named '"
-                            + name + "' (id=" + other.getId() + ")");
+                    throw new ResourceConflictException("You already have a strategy named "
+                            + name + " (id=" + other.getId() + ")");
                 });
     }
 
@@ -653,13 +687,13 @@ public class UserStrategyServiceImpl implements UserStrategyService {
 
     // -------------------------------------------------------------- mapping
 
-    private UserStrategyResponse toResponse(UserStrategy userStrategy) {
-        StrategyTemplate template = userStrategy.getStrategy();
-        Symbol symbol = userStrategy.getSymbol();
-        Map<String, UserStrategyParameter> overrides = overridesByKey(userStrategy);
+    private UserStrategyResponse toResponse(UserStrategy strategy) {
+        StrategyTemplate template = strategy.getStrategy();
+        Symbol symbol = strategy.getSymbol();
+        SharedStrategyConfig config = strategy.getSharedConfig();
 
         List<UserStrategyIndicatorResponse> indicators = new ArrayList<>();
-        for (UserStrategyIndicator row : indicatorRows(userStrategy)) {
+        for (UserStrategyIndicator row : indicatorRows(strategy)) {
             Indicator indicator = row.getIndicator();
             indicators.add(new UserStrategyIndicatorResponse(
                     row.getId(),
@@ -668,26 +702,44 @@ public class UserStrategyServiceImpl implements UserStrategyService {
                     row.getSlot(),
                     row.isEnabled(),
                     row.getDisplayOrder(),
-                    indicatorKnobs(row, overrides)));
+                    json.toMap(row.getParams()),
+                    json.toMap(indicator.getParamSchema())));
         }
 
         return new UserStrategyResponse(
-                userStrategy.getId(),
-                userStrategy.getUser().getId(),
+                strategy.getId(),
+                strategy.getUser().getId(),
                 template.getId(),
                 template.getName(),
                 template.getDescription(),
-                userStrategy.getName(),
-                userStrategy.getDescription(),
+                strategy.getName(),
+                strategy.getDescription(),
                 symbol != null ? symbol.getId() : null,
                 symbol != null ? symbol.getSymbol() : null,
-                userStrategy.getTimeframe(),
+                symbol != null ? symbol.getInstrumentType() : null,
+                symbol != null ? symbol.getExchange().getCode() : null,
+                strategy.getCandleDuration(),
+                strategy.getTriggerDuration(),
+                strategy.getDerivative().name(),
+                strategy.isCeEnabled(),
+                strategy.getCeMoneyness() != null ? strategy.getCeMoneyness().name() : null,
+                strategy.getCeStrikeOffset(),
+                strategy.isPeEnabled(),
+                strategy.getPeMoneyness() != null ? strategy.getPeMoneyness().name() : null,
+                strategy.getPeStrikeOffset(),
+                validator.legs(strategy),
+                strategy.getLotRule().name(),
+                strategy.getBaseLot(),
+                strategy.getAveragingCount(),
+                strategy.getSlPct(),
+                strategy.getTpPct(),
                 indicators,
-                strategyKnobs(userStrategy, overrides),
-                overrides.size(),
-                symbol != null && userStrategy.getTimeframe() != null,
-                userStrategy.isActive(),
-                userStrategy.getCreatedAt(),
-                userStrategy.getUpdatedAt());
+                config != null ? config.getId() : null,
+                config != null ? config.getConfigHash() : null,
+                strategy.isDeployable(),
+                subscriptionRepository.countByUserStrategy_Id(strategy.getId()),
+                strategy.isActive(),
+                strategy.getCreatedAt(),
+                strategy.getUpdatedAt());
     }
 }

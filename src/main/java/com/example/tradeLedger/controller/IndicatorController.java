@@ -2,10 +2,11 @@ package com.example.tradeLedger.controller;
 
 import com.example.tradeLedger.dto.IndicatorRequest;
 import com.example.tradeLedger.dto.IndicatorResponse;
-import com.example.tradeLedger.dto.ParameterResponse;
 import com.example.tradeLedger.service.IndicatorCatalogService;
-import com.example.tradeLedger.service.ParameterCatalogService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.ExampleObject;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,11 +20,11 @@ import java.util.UUID;
 /**
  * Indicator management over the {@code indicators} table.
  *
- * An indicator's parameters are its {@code paramSchema} - the design stores them
- * as a JSON schema on the indicator row rather than in a parameter table, so
- * parameter CRUD happens through create/update here. The VALUES a user picks for
- * those parameters live on the strategy, under
- * {@code /api/v1/strategy-templates/{id}/params}.
+ * An indicator's parameters ARE its {@code paramSchema} - there is no parameter
+ * table behind it, so declaring a knob is an edit to this row. The values a user
+ * picks for them live on their own strategy, in
+ * {@code user_strategy_indicators.params}, and are validated against this schema
+ * every time they are written.
  */
 @RestController
 @RequestMapping("/api/v1/indicators")
@@ -33,12 +34,9 @@ public class IndicatorController extends SecuredController {
     private static final Logger log = LoggerFactory.getLogger(IndicatorController.class);
 
     private final IndicatorCatalogService indicatorService;
-    private final ParameterCatalogService parameterService;
 
-    public IndicatorController(IndicatorCatalogService indicatorService,
-                               ParameterCatalogService parameterService) {
+    public IndicatorController(IndicatorCatalogService indicatorService) {
         this.indicatorService = indicatorService;
-        this.parameterService = parameterService;
     }
 
     @GetMapping
@@ -62,20 +60,34 @@ public class IndicatorController extends SecuredController {
         return indicatorService.getByName(name);
     }
 
-    /**
-     * The second level of the hierarchy on its own, for a client that already has
-     * an indicator id and does not want the whole strategy.
-     */
-    @GetMapping("/{id}/parameters")
-    @Operation(summary = "The parameters of one indicator, by id")
-    public List<ParameterResponse> parameters(@PathVariable UUID id) {
-        log.info("GET indicator={} parameters | user={}", id, currentEmail());
-        return parameterService.forIndicator(id);
-    }
-
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    @Operation(summary = "Create an indicator and its parameter schema")
+    @Operation(summary = "Create an indicator and its parameter schema",
+            description = "The paramSchema IS the parameter declaration - there is no parameter "
+                    + "table behind it. Every entry needs a type and a default. The name is "
+                    + "uppercased on save.")
+    @io.swagger.v3.oas.annotations.parameters.RequestBody(
+            required = true,
+            content = @Content(schema = @Schema(implementation = IndicatorRequest.class),
+                    examples = {
+                            @ExampleObject(name = "Numeric knobs with a cross-field rule",
+                                    description = "lt names another key of the SAME indicator, so "
+                                            + "d must stay under k.",
+                                    value = """
+                                            { "name": "ema fast slow",
+                                              "paramSchema": {
+                                                "k": { "type": "int", "min": 1, "max": 300, "default": 21 },
+                                                "d": { "type": "int", "min": 1, "max": 300, "default": 9, "lt": "k" }
+                                              } }"""),
+                            @ExampleObject(name = "Mixed types including an enum",
+                                    value = """
+                                            { "name": "supertrend",
+                                              "paramSchema": {
+                                                "period":     { "type": "int",     "min": 1,   "max": 100, "default": 10 },
+                                                "multiplier": { "type": "decimal", "min": 0.5, "max": 10,  "default": 3.0 },
+                                                "source":     { "type": "enum", "options": ["close","hl2","hlc3"], "default": "close" }
+                                              } }""")
+                    }))
     public IndicatorResponse create(@RequestBody IndicatorRequest request) {
         log.info("CREATE indicator '{}' | user={}",
                 request != null ? request.getName() : null, currentEmail());

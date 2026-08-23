@@ -8,27 +8,26 @@ import java.time.OffsetDateTime;
 import java.util.UUID;
 
 /**
- * Table {@code strategy_templates}: the strategy template - "the math".
+ * Table {@code strategy_templates}: the strategy LOGIC - "the math", and nothing
+ * a user configures.
  *
- * A strategy declares which indicators it uses through {@link #ruleTree}, which
+ * A template declares which indicators it uses through {@link #ruleTree}, which
  * holds conditions over indicator references with {@code $key} bindings:
  *
  * <pre>
- * {"entry":{"cross_above":[{"ind":"EMA","params":{"period":"$fast"}},
- *                          {"ind":"EMA","params":{"period":"$slow"}}]}}
+ * {"entry":{"ind":"EMA CROSSOVER","params":{"k":"$k","d":"$d"}}}
  * </pre>
  *
- * That is the strategy-to-indicator relationship in this design: {@code "ind"}
- * values resolve by name against {@link Indicator}, and the {@code $key}
- * bindings resolve against {@link StrategyParamDefinition} rows. The tree stays the
- * source of truth; {@link StrategyIndicatorLink} indexes it into real foreign keys
- * on every save, recording WHICH indicators are used and never at which
- * parameterization - one strategy using the same indicator twice, as EMA
- * Crossover does, is one dependency and two computations.
+ * That is the whole of the template-to-indicator relationship: {@code "ind"}
+ * values resolve by name against {@link Indicator}, and each {@code $key} names a
+ * parameter that indicator's own {@code param_schema} declares. There is no index
+ * table beside it - the tree is read directly wherever the indicator set is
+ * needed, which is the only way the two can never fall out of step.
  *
- * Tunable knobs live in {@link StrategyParamDefinition}; concrete values live in
- * {@link SharedStrategyConfig} (signal scope) and {@link StrategySubscription} (execution
- * scope). New strategies are INSERTs here, never new columns.
+ * A template holds no defaults, no strikes, no sizing and no exits. Those are
+ * typed columns on {@link UserStrategy}, because they belong to a user's
+ * configuration rather than to the logic. New strategies are INSERTs here, never
+ * new columns.
  */
 @Entity
 @Table(name = "strategy_templates")

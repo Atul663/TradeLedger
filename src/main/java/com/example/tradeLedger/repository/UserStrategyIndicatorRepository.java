@@ -20,4 +20,7 @@ public interface UserStrategyIndicatorRepository extends JpaRepository<UserStrat
 
     /** Slot-less lookup, for the common case where the caller sends only an indicator id. */
     List<UserStrategyIndicator> findByUserStrategy_IdAndIndicator_Id(UUID userStrategyId, UUID indicatorId);
+
+    /** Guards indicator deletion: a primitive somebody's strategy is tuned on is in use. */
+    long countByIndicator_Id(UUID indicatorId);
 }

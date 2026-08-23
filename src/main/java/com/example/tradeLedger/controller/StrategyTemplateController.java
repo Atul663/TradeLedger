@@ -1,13 +1,12 @@
 package com.example.tradeLedger.controller;
 
-import com.example.tradeLedger.dto.ParameterResponse;
 import com.example.tradeLedger.dto.StrategyTemplateDetailResponse;
-import com.example.tradeLedger.dto.StrategyParamDefinitionRequest;
-import com.example.tradeLedger.dto.StrategyParamDefinitionResponse;
 import com.example.tradeLedger.dto.StrategyTemplateRequest;
-import com.example.tradeLedger.service.ParameterCatalogService;
 import com.example.tradeLedger.service.StrategyTemplateService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.ExampleObject;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,27 +18,28 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * StrategyTemplate management over the {@code strategy_templates} table.
+ * The template catalog: the strategy logic a user picks from.
  *
- * Distinct from the pre-existing {@code /api/v1/strategy} endpoints, which
- * manage the platform-wide on/off switches in {@code platform_strategy_toggles} and are
+ * A template is a rule tree over indicators and nothing else. Each response
+ * carries the indicators that tree names together with their parameter schemas,
+ * which is everything a "new strategy" form needs that varies per template - the
+ * instrument, strike, ladder and exit fields are the same on all of them.
  *
+ * Distinct from the pre-existing {@code /api/v1/strategy} endpoints, which manage
+ * the platform-wide on/off switches in {@code platform_strategy_toggles} and are
  * left exactly as they were.
  */
 @RestController
 @RequestMapping("/api/v1/strategy-templates")
-@Tag(name = "Strategy templates", description = "Strategy templates, their rule trees and their tunable parameters")
+@Tag(name = "Strategy templates", description = "Strategy logic: rule trees and the indicators they use")
 public class StrategyTemplateController extends SecuredController {
 
     private static final Logger log = LoggerFactory.getLogger(StrategyTemplateController.class);
 
     private final StrategyTemplateService strategyService;
-    private final ParameterCatalogService parameterService;
 
-    public StrategyTemplateController(StrategyTemplateService strategyService,
-                                      ParameterCatalogService parameterService) {
+    public StrategyTemplateController(StrategyTemplateService strategyService) {
         this.strategyService = strategyService;
-        this.parameterService = parameterService;
     }
 
     @GetMapping
@@ -66,7 +66,36 @@ public class StrategyTemplateController extends SecuredController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    @Operation(summary = "Create a strategy, optionally with its full parameter set")
+    @Operation(summary = "Publish a new template",
+            description = "A template is LOGIC only - a rule tree over indicators. There is no "
+                    + "knob list: each indicator declares its own parameters, and every other "
+                    + "setting is a fixed column on user_strategies. is_system is forced false.")
+    @io.swagger.v3.oas.annotations.parameters.RequestBody(
+            required = true,
+            content = @Content(schema = @Schema(implementation = StrategyTemplateRequest.class),
+                    examples = {
+                            @ExampleObject(name = "One indicator",
+                                    value = """
+                                            { "name": "RSI Reversal",
+                                              "description": "Long when RSI leaves oversold.",
+                                              "ruleTree": { "entry": { "ind": "RSI", "params": { "period": "$period" } } } }"""),
+                            @ExampleObject(name = "Two indicators combined",
+                                    description = "Nodes nest freely under any object or array. "
+                                            + "Each $key binds to a key of that indicator's own schema.",
+                                    value = """
+                                            {
+                                              "name": "EMA with RSI filter",
+                                              "description": "EMA averaging, gated on RSI.",
+                                              "ruleTree": {
+                                                "entry": {
+                                                  "and": [
+                                                    { "ind": "EMA AVERAGING", "params": { "k": "$k", "d": "$d" } },
+                                                    { "ind": "RSI", "params": { "period": "$period" } }
+                                                  ]
+                                                }
+                                              }
+                                            }""")
+                    }))
     public StrategyTemplateDetailResponse create(@RequestBody StrategyTemplateRequest request) {
         log.info("CREATE strategy '{}' | user={}",
                 request != null ? request.getName() : null, currentEmail());
@@ -88,53 +117,4 @@ public class StrategyTemplateController extends SecuredController {
         return ResponseEntity.noContent().build();
     }
 
-    // --------------------------------------------------------- the hierarchy
-
-    /**
-     * The strategy's own parameters - SL, TP and friends - without its indicators'.
-     * The full hierarchy comes back from {@code GET /api/v1/strategy-templates/{id}}; this
-     * is the one branch of it on its own.
-     */
-    @GetMapping("/{id}/parameters")
-    @Operation(summary = "Parameters belonging to the strategy directly, by id")
-    public List<ParameterResponse> parameters(@PathVariable UUID id) {
-        log.info("GET strategy={} parameters | user={}", id, currentEmail());
-        return parameterService.forStrategy(id);
-    }
-
-    // ------------------------------------------------- indicator parameters
-
-    @GetMapping("/{id}/params")
-    @Operation(summary = "List a strategy's parameter definitions")
-    public List<StrategyParamDefinitionResponse> listParams(@PathVariable UUID id) {
-        log.info("GET strategy={} params | user={}", id, currentEmail());
-        return strategyService.listParams(id);
-    }
-
-    @PostMapping("/{id}/params")
-    @ResponseStatus(HttpStatus.CREATED)
-    @Operation(summary = "Add one parameter definition to a strategy")
-    public StrategyParamDefinitionResponse addParam(@PathVariable UUID id,
-                                                  @RequestBody StrategyParamDefinitionRequest request) {
-        log.info("ADD param '{}' strategy={} | user={}",
-                request != null ? request.getParameterKey() : null, id, currentEmail());
-        return strategyService.addParam(id, request);
-    }
-
-    @PutMapping("/{id}/params/{paramId}")
-    @Operation(summary = "Update one parameter definition")
-    public StrategyParamDefinitionResponse updateParam(@PathVariable UUID id,
-                                                     @PathVariable Long paramId,
-                                                     @RequestBody StrategyParamDefinitionRequest request) {
-        log.info("UPDATE param={} strategy={} | user={}", paramId, id, currentEmail());
-        return strategyService.updateParam(id, paramId, request);
-    }
-
-    @DeleteMapping("/{id}/params/{paramId}")
-    @Operation(summary = "Delete one parameter definition; refused while the rule tree binds it")
-    public ResponseEntity<Void> deleteParam(@PathVariable UUID id, @PathVariable Long paramId) {
-        log.info("DELETE param={} strategy={} | user={}", paramId, id, currentEmail());
-        strategyService.deleteParam(id, paramId);
-        return ResponseEntity.noContent().build();
-    }
 }

@@ -9,6 +9,9 @@ import com.example.tradeLedger.dto.UserBrokerResponse;
 import com.example.tradeLedger.service.BrokerCredentialService;
 import com.example.tradeLedger.service.UserBrokerService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.ExampleObject;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -108,7 +111,49 @@ public class UserBrokerController extends SecuredController {
      */
     @PostMapping("/setup")
     @ResponseStatus(HttpStatus.CREATED)
-    @Operation(summary = "Create a broker setup, its first account and its API key in one call")
+    @Operation(summary = "Create a broker setup, its first account and its API key in one call",
+            description = "One transaction: a rejected key takes the setup and the account back "
+                    + "out with it. Add more accounts later with POST /api/v1/trading-accounts - "
+                    + "that is what makes a userBrokerId deploy target fan out.")
+    @io.swagger.v3.oas.annotations.parameters.RequestBody(
+            required = true,
+            content = @Content(schema = @Schema(implementation = BrokerSetupRequest.class),
+                    examples = {
+                            @ExampleObject(name = "api_key broker (Dhan)",
+                                    description = "The key belongs to the login, so it goes on the "
+                                            + "SETUP and every later account inherits it.",
+                                    value = """
+                                            {
+                                              "brokerCode": "DHAN",
+                                              "label": "My Dhan",
+                                              "account": { "accountName": "main", "brokerAccountId": "1100112233" },
+                                              "credentials": {
+                                                "apiKey": "dhan-api-key-xxxx",
+                                                "apiSecret": "dhan-api-secret-yyyy",
+                                                "clientId": "1100112233"
+                                              },
+                                              "credentialsScope": "SETUP"
+                                            }"""),
+                            @ExampleObject(name = "oauth_redirect broker (Zerodha)",
+                                    value = """
+                                            {
+                                              "brokerCode": "ZERODHA",
+                                              "label": "My Zerodha",
+                                              "account": { "accountName": "kite-main", "brokerAccountId": "AB1234" },
+                                              "credentials": {
+                                                "apiKey": "kite-api-key",
+                                                "apiSecret": "kite-api-secret",
+                                                "redirectUrl": "https://app.example.com/broker/callback",
+                                                "accessToken": "kite-access-token",
+                                                "tokenExpiresAt": "2026-08-24T09:15:00+05:30"
+                                              },
+                                              "credentialsScope": "SETUP"
+                                            }"""),
+                            @ExampleObject(name = "Setup only, finish later",
+                                    description = "Both account and credentials are optional.",
+                                    value = """
+                                            { "brokerCode": "DHAN", "label": "My Dhan" }""")
+                    }))
     public BrokerSetupResponse setup(@RequestBody BrokerSetupRequest request) {
         String email = currentEmail();
         // The body holds secrets: log the broker, never the credentials.

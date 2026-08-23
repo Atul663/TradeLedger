@@ -89,7 +89,7 @@ public class SharedStrategyConfigServiceImpl implements SharedStrategyConfigServ
     @Override
     @Transactional
     public void retireIfOrphaned(UUID instanceId) {
-        if (subscriptionRepository.countBySharedConfig_IdAndActiveTrue(instanceId) > 0) {
+        if (subscriptionRepository.countByUserStrategy_SharedConfig_IdAndActiveTrue(instanceId) > 0) {
             return;
         }
         sharedConfigRepository.findById(instanceId).ifPresent(instance -> {
@@ -139,7 +139,7 @@ public class SharedStrategyConfigServiceImpl implements SharedStrategyConfigServ
         long subscriptions = 0;
         Set<String> fingerprints = new TreeSet<>();
         for (SharedStrategyConfig instance : active) {
-            subscriptions += subscriptionRepository.countBySharedConfig_IdAndActiveTrue(instance.getId());
+            subscriptions += subscriptionRepository.countByUserStrategy_SharedConfig_IdAndActiveTrue(instance.getId());
             fingerprints.addAll(resolveIndicators(instance));
         }
         return IndicatorPlanResponse.of(subscriptions, active.size(), new ArrayList<>(fingerprints));
@@ -162,7 +162,7 @@ public class SharedStrategyConfigServiceImpl implements SharedStrategyConfigServ
                 instance.getSupersedes() != null ? instance.getSupersedes().getId() : null,
                 instance.getStatus(),
                 new ArrayList<>(resolveIndicators(instance)),
-                subscriptionRepository.countBySharedConfig_IdAndActiveTrue(instance.getId()),
+                subscriptionRepository.countByUserStrategy_SharedConfig_IdAndActiveTrue(instance.getId()),
                 instance.getCreatedAt());
     }
 

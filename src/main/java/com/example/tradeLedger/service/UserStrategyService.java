@@ -1,72 +1,71 @@
 package com.example.tradeLedger.service;
 
-import com.example.tradeLedger.dto.StrategySubscriptionResponse;
+import com.example.tradeLedger.dto.StrategyDeployRequest;
+import com.example.tradeLedger.dto.StrategyDeploymentResponse;
 import com.example.tradeLedger.dto.UserStrategyRequest;
 import com.example.tradeLedger.dto.UserStrategyResponse;
 import com.example.tradeLedger.dto.UserStrategyRuntimeResponse;
-import com.example.tradeLedger.dto.UserStrategySubscribeRequest;
-import com.example.tradeLedger.dto.UserStrategyUpdateRequest;
 
 import java.util.List;
 import java.util.UUID;
 
 /**
- * A user's own customizations of the global strategy templates.
+ * A user's own strategies: the complete, runnable configurations they build from
+ * the platform templates.
  *
- * The global template, its indicators and the parameter catalog are shared by
- * every user and are never written from here. What a user owns is a
- * {@code user_strategies} row, the indicator usages under it, and one row per
- * knob they actually changed - so an admin retuning a global default moves every
- * user who left that knob alone, and moves nobody who overrode it.
+ * A strategy holds its whole configuration in typed columns - the market, the
+ * instrument, the strikes, the averaging ladder, the exits - plus one row per
+ * indicator carrying that indicator values as jsonb. The template supplies the
+ * logic and is never written from here.
  *
- * Two read shapes over the same tables, because the two consumers want different
+ * Two read shapes over the same rows, because the two consumers want different
  * things:
  * <ul>
- *   <li>{@link #get} - the UI's shape: template, indicators, and every knob with
- *       its global default and the user's value side by side</li>
- *   <li>{@link #runtime} - the bot's shape: the same knobs collapsed to the
- *       values in force, already split into signal and execution scope</li>
+ *   <li>{@link #get} - the editor shape: every column as it is stored, plus each
+ *       indicator schema so the form can render itself</li>
+ *   <li>{@link #runtime} - the bot shape: legs resolved, values coerced, and the
+ *       signal params exactly as they were hashed</li>
  * </ul>
  *
- * Every method takes the authenticated caller's email and scopes its work to that
- * user's rows. Someone else's user strategy is not "forbidden", it is not found.
+ * Every method takes the authenticated caller email and scopes its work to that
+ * user rows. Someone else strategy is not "forbidden", it is not found.
  */
 public interface UserStrategyService {
 
     /**
      * @param active     true/false to filter by the archive flag, null for all
-     * @param strategyId only customizations of this template, or null for all
+     * @param strategyId only strategies built from this template, or null for all
      */
     List<UserStrategyResponse> list(String email, Boolean active, UUID strategyId);
 
     UserStrategyResponse get(String email, UUID id);
 
     /**
-     * Customize a template. The indicator rows are created from the template's own
-     * indicators, and only the knobs named in {@code overrides} get a row - a
-     * request with none saves a faithful copy sitting on global defaults.
+     * Build a strategy from a template. Absent fields take their column defaults
+     * and absent indicator values take their schema defaults, so a body naming
+     * only the template saves a runnable strategy on platform defaults.
      */
     UserStrategyResponse create(String email, UserStrategyRequest request);
 
     /**
-     * Partial update. Overrides are applied entry by entry; an entry with a null
-     * value clears that override and returns the knob to the global default.
+     * Partial update. A present field is applied, an absent one is left alone.
+     * Changing anything that feeds the config hash repoints the strategy at a new
+     * shared computation and retires the old one once nobody is left on it.
      */
-    UserStrategyResponse update(String email, UUID id, UserStrategyUpdateRequest request);
+    UserStrategyResponse update(String email, UUID id, UserStrategyRequest request);
 
+    /** Refused while the strategy is still deployed on any broker. */
     void delete(String email, UUID id);
 
-    /**
-     * The bot's read: indicators and their effective values, resolved
-     * custom &rarr; indicator default &rarr; catalog default, with the signal /
-     * execution split already applied.
-     */
+    /** The bot read: everything resolved, nothing left to look up. */
     UserStrategyRuntimeResponse runtime(String email, UUID id);
 
     /**
-     * Put a user strategy to work on a trading account. Its effective values are
-     * projected into the flat map the execution path already consumes, so dedup
-     * and the config hash keep working untouched.
+     * Deploy one strategy onto many brokers in one call.
+     *
+     * Each account is subscribed in its own transaction and reports its own
+     * outcome, so one account that already runs this strategy does not stop the
+     * others from starting.
      */
-    StrategySubscriptionResponse subscribe(String email, UUID id, UserStrategySubscribeRequest request);
+    StrategyDeploymentResponse deploy(String email, UUID id, StrategyDeployRequest request);
 }

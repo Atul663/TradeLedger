@@ -1,62 +1,58 @@
 package com.example.tradeLedger.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 import java.time.OffsetDateTime;
 
 /**
- * Credentials for a broker setup, or one account's override of them.
+ * Broker API credentials. Stored AES-GCM encrypted; never returned in a read.
  *
- * The same body serves both levels - {@code PUT /my-brokers/{id}/credentials}
- * writes the setup's, {@code PUT /trading-accounts/{id}/credentials} writes an
- * override for that one account. Which fields matter depends on the broker's
- * {@code authType}; this carries the union.
- *
- * <p><b>Partial by design.</b> A field left out, or sent as null, keeps whatever
- * was stored. That is what makes "store today's access token" a one-field request
- * without resending an API secret the caller cannot read back. To remove a value,
- * send an empty string:
- *
- * <pre>
- * {"accessToken": "eyJ..."}   // rotate the token, everything else untouched
- * {"totpSecret": ""}          // clear the TOTP seed
- * </pre>
- *
- * <p><b>At the account level, fields inherit.</b> An override row holding only an
- * access token still uses the setup's API key and secret - resolution is per
- * field, not per row. Clearing the last field on an override deletes the row, and
- * the account goes back to inheriting everything.
- *
- * Secret fields are encrypted before being written and are never returned.
+ * PUT is partial: a field left out keeps its stored value, and a field sent as
+ * {@code ""} clears it.
  */
+@Schema(name = "BrokerCredentialRequest",
+        description = """
+                Broker API credentials. Send only what the broker's authType needs:
+
+                  api_key         apiKey, apiSecret, clientId
+                  oauth_redirect  apiKey, apiSecret, redirectUrl, accessToken, refreshToken, tokenExpiresAt
+                  totp            apiKey, clientId, totpSecret
+
+                Stored AES-GCM encrypted and NEVER returned - reads give has* booleans and an \
+                apiKeyHint. PUT is partial: an omitted field keeps its stored value, and a field \
+                sent as "" clears it.
+
+                Requires CREDENTIAL_ENCRYPTION_KEY to be set on the server, or every read and \
+                write here fails.""")
 public class BrokerCredentialRequest {
 
-    /** Public half of the API credential pair. Encrypted at rest regardless. */
+    @Schema(example = "dhan-api-key-xxxx")
     private String apiKey;
 
-    /** Secret half. Encrypted at rest, never returned. */
+    @Schema(example = "dhan-api-secret-yyyy")
     private String apiSecret;
 
-    /**
-     * OAuth callback the broker redirects to after login. Not a secret - it is
-     * registered publicly with the broker - so it is stored and returned as-is.
-     */
+    @Schema(description = "oauth_redirect brokers only.", example = "https://app.example.com/broker/callback")
     private String redirectUrl;
 
-    /** The broker's login identifier (Dhan client id, Angel client code). */
+    @Schema(description = "The broker's client / user id.", example = "1100112233")
     private String clientId;
 
-    /** Session token, usually short-lived. Encrypted at rest, never returned. */
+    @Schema(description = "oauth_redirect brokers only.", example = "eyJhbGciOiJIUzI1NiJ9…")
     private String accessToken;
 
-    /** Used to mint a new access token where the broker supports it. */
+    @Schema(description = "oauth_redirect brokers only.")
     private String refreshToken;
 
-    /** TOTP seed for brokers whose login requires a rolling code. */
+    @Schema(description = "totp brokers only - the shared secret behind the rotating code.")
     private String totpSecret;
 
-    /** When the access token stops working; drives the "needs re-auth" flag. */
+    @Schema(description = "When accessToken expires; drives the tokenExpired flag on read.",
+            example = "2026-08-24T09:15:00+05:30")
     private OffsetDateTime tokenExpiresAt;
 
-    /** Optional pointer for installations that do keep secrets in Vault. */
+    @Schema(description = "Pointer to an external secret store, instead of storing the secret here.",
+            example = "vault://kv/brokers/dhan/main")
     private String vaultRef;
 
     public String getApiKey() { return apiKey; }

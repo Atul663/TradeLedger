@@ -1,17 +1,10 @@
 package com.example.tradeLedger.config;
 
 import com.example.tradeLedger.entity.Indicator;
-import com.example.tradeLedger.entity.IndicatorParameterLink;
-import com.example.tradeLedger.entity.Parameter;
 import com.example.tradeLedger.entity.StrategyTemplate;
-import com.example.tradeLedger.entity.StrategyParamDefinition;
 import com.example.tradeLedger.repository.IndicatorRepository;
-import com.example.tradeLedger.repository.IndicatorParameterLinkRepository;
-import com.example.tradeLedger.repository.ParameterRepository;
-import com.example.tradeLedger.repository.SharedStrategyConfigRepository;
 import com.example.tradeLedger.repository.StrategyTemplateRepository;
-import com.example.tradeLedger.serviceImpl.StrategyIndicatorLinkSync;
-import com.example.tradeLedger.serviceImpl.StrategyParameterLinkSync;
+import com.example.tradeLedger.repository.UserStrategyRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
@@ -20,32 +13,25 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Seeds the predefined catalog: the parameters, the indicators, the EMA Crossover
- * strategy, and the links that connect them.
+ * Seeds the platform catalog: the indicators, and the templates whose rule trees
+ * use them.
  *
  * <pre>
- *   EMA Crossover (strategy)
- *   │
- *   ├── EMA CROSSOVER (indicator)
- *   │     ├── K
- *   │     └── D
- *   │
- *   ├── SL                 universal
- *   ├── TP                 universal
- *   ├── Quantity           universal
- *   ├── Candle Duration    universal
- *   └── Trigger Duration   universal
+ *   indicators                       strategy_templates
+ *     EMA CROSSOVER  k, d              EMA Crossover   -> EMA CROSSOVER
+ *     EMA AVERAGING  k, d              EMA Averaging   -> EMA AVERAGING
+ *     EMA            period
+ *     RSI            period
  * </pre>
  *
- * Every step keys on a unique business column - {@code parameters.code},
- * {@code indicators.name}, {@code strategies.name}, and the two link-table
- * unique constraints - so running this any number of times converges on the same
- * rows and never duplicates one.
+ * Two tables and one rule tree between them - there is no parameter catalog to
+ * seed and no link table to reconcile. An indicator declares its own knobs in
+ * {@code param_schema}, and everything else a strategy has is a typed column on
+ * {@code user_strategies}, the same for every template.
  *
- * Nothing here is EMA-specific machinery: this class only supplies DATA to the
- * generic Strategy - Indicator - Parameter model. A second strategy is more rows
- * through the same three tables, authored here or through the API, with no code
- * change anywhere.
+ * Every step keys on a unique business column ({@code indicators.name},
+ * {@code strategy_templates.name}) so running this any number of times converges
+ * on the same rows and never duplicates one.
  */
 @Component
 public class ControlPlaneSeeder implements ApplicationRunner {
@@ -55,195 +41,127 @@ public class ControlPlaneSeeder implements ApplicationRunner {
     public static final String EMA_CROSSOVER = "EMA Crossover";
     public static final String EMA_CROSSOVER_INDICATOR = "EMA CROSSOVER";
 
+    public static final String EMA_AVERAGING = "EMA Averaging";
+    public static final String EMA_AVERAGING_INDICATOR = "EMA AVERAGING";
+
     /**
-     * Binds the strategy onto its indicator. {@code $k} and {@code $d} resolve
-     * against the derived knob set, which the parameter catalog produces.
+     * The classic crossover: a fast leg and a slow one, so {@code d} must exceed
+     * {@code k}.
      */
-    private static final String RULE_TREE = """
+    private static final String EMA_CROSSOVER_SCHEMA = """
+            {"k":{"type":"int","min":1,"max":300,"default":9},\
+            "d":{"type":"int","min":1,"max":300,"default":21,"gt":"k"}}""";
+
+    /**
+     * The averaging variant: {@code k} is the EMA of the highs and {@code d} the
+     * shorter signal leg, so the constraint runs the other way - 21/9 and 50/21
+     * are both valid, 9/21 is not.
+     */
+    private static final String EMA_AVERAGING_SCHEMA = """
+            {"k":{"type":"int","min":1,"max":300,"default":21},\
+            "d":{"type":"int","min":1,"max":300,"default":9,"lt":"k"}}""";
+
+    private static final String EMA_CROSSOVER_TREE = """
             {"entry":{"ind":"EMA CROSSOVER","params":{"k":"$k","d":"$d"}}}""";
 
-    private static final String TIMEFRAME_OPTIONS =
-            "{\"options\":[\"1m\",\"3m\",\"5m\",\"15m\",\"30m\",\"1h\",\"4h\",\"1d\"]}";
+    private static final String EMA_AVERAGING_TREE = """
+            {"entry":{"ind":"EMA AVERAGING","params":{"k":"$k","d":"$d"}}}""";
 
-    private final ParameterRepository parameterRepository;
     private final IndicatorRepository indicatorRepository;
-    private final IndicatorParameterLinkRepository indicatorParameterRepository;
-    private final StrategyTemplateRepository strategyRepository;
-    private final SharedStrategyConfigRepository sharedConfigRepository;
-    private final StrategyIndicatorLinkSync indicatorSync;
-    private final StrategyParameterLinkSync parameterSync;
+    private final StrategyTemplateRepository templateRepository;
+    private final UserStrategyRepository userStrategyRepository;
 
-    public ControlPlaneSeeder(ParameterRepository parameterRepository,
-                              IndicatorRepository indicatorRepository,
-                              IndicatorParameterLinkRepository indicatorParameterRepository,
-                              StrategyTemplateRepository strategyRepository,
-                              SharedStrategyConfigRepository sharedConfigRepository,
-                              StrategyIndicatorLinkSync indicatorSync,
-                              StrategyParameterLinkSync parameterSync) {
-        this.parameterRepository = parameterRepository;
+    public ControlPlaneSeeder(IndicatorRepository indicatorRepository,
+                              StrategyTemplateRepository templateRepository,
+                              UserStrategyRepository userStrategyRepository) {
         this.indicatorRepository = indicatorRepository;
-        this.indicatorParameterRepository = indicatorParameterRepository;
-        this.strategyRepository = strategyRepository;
-        this.sharedConfigRepository = sharedConfigRepository;
-        this.indicatorSync = indicatorSync;
-        this.parameterSync = parameterSync;
+        this.templateRepository = templateRepository;
+        this.userStrategyRepository = userStrategyRepository;
     }
 
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
-        seedParameterCatalog();
         seedIndicators();
-        seedEmaCrossoverStrategy();
-
-        // Derived layers, in order: the rule tree indexes into strategy_indicator_links,
-        // and the parameter sync then walks those links to build the knob set.
-        indicatorSync.syncAll();
-        parameterSync.syncAll();
-    }
-
-    // ----------------------------------------------------- parameter catalog
-
-    /**
-     * The canonical parameters. Each exists once, whoever uses it.
-     *
-     * {@code universal} marks the ones every strategy gets automatically - the
-     * execution settings that are not a property of any particular strategy.
-     */
-    private void seedParameterCatalog() {
-        // Indicator parameters - signal scope, so they enter the config hash and
-        // two users asking for the same values share one computation.
-        seedParameter("k", "K", StrategyParamDefinition.TYPE_INT, Parameter.SCOPE_SIGNAL, "9",
-                "{\"min\":1,\"max\":300}", "Fast leg length of the crossover", false, 1);
-        seedParameter("d", "D", StrategyParamDefinition.TYPE_INT, Parameter.SCOPE_SIGNAL, "21",
-                "{\"min\":1,\"max\":300,\"gt\":\"k\"}", "Slow leg length of the crossover", false, 2);
-        // Shared by EMA and RSI at different ranges - see the per-link overrides.
-        seedParameter("period", "Period", StrategyParamDefinition.TYPE_INT, Parameter.SCOPE_SIGNAL, "14",
-                "{\"min\":2,\"max\":300}", "Lookback length", false, 3);
-
-        // StrategyTemplate parameters - execution scope, personal, never hashed. The
-        // display order is the order a form should render them in.
-        seedParameter("sl", "SL", StrategyParamDefinition.TYPE_DECIMAL, Parameter.SCOPE_EXECUTION, "1.5",
-                "{\"min\":0.1,\"max\":50}", "Stop loss percentage", true, 10);
-        seedParameter("tp", "TP", StrategyParamDefinition.TYPE_DECIMAL, Parameter.SCOPE_EXECUTION, "3.0",
-                "{\"min\":0.1,\"max\":100}", "Take profit percentage", true, 11);
-        seedParameter("quantity", "Quantity", StrategyParamDefinition.TYPE_INT, Parameter.SCOPE_EXECUTION, "1",
-                "{\"min\":1,\"max\":1000000}", "Order size", true, 12);
-        seedParameter("candle_duration", "Candle Duration", StrategyParamDefinition.TYPE_TIMEFRAME,
-                Parameter.SCOPE_EXECUTION, "5m", TIMEFRAME_OPTIONS,
-                "Candle size the strategy evaluates on", true, 13);
-        seedParameter("trigger_duration", "Trigger Duration", StrategyParamDefinition.TYPE_TIMEFRAME,
-                Parameter.SCOPE_EXECUTION, "5m", TIMEFRAME_OPTIONS,
-                "How often the entry condition is re-evaluated", true, 14);
-    }
-
-    private Parameter seedParameter(String code, String name, String dataType, String scope,
-                                    String defaultValue, String validation, String description,
-                                    boolean universal, int displayOrder) {
-        return parameterRepository.findByCode(code).orElseGet(() -> {
-            Parameter parameter = new Parameter();
-            parameter.setCode(code);
-            parameter.setName(name);
-            parameter.setDataType(dataType);
-            parameter.setScope(scope);
-            parameter.setDefaultValue(defaultValue);
-            parameter.setValidation(validation);
-            parameter.setDescription(description);
-            parameter.setUniversal(universal);
-            parameter.setDisplayOrder(displayOrder);
-            parameter.setSystem(true);
-            Parameter saved = parameterRepository.save(parameter);
-            log.info("Seeded parameter '{}' ({} scope{}) id={}",
-                    code, scope, universal ? ", universal" : "", saved.getId());
-            return saved;
-        });
+        seedTemplates();
     }
 
     // ------------------------------------------------------------ indicators
 
     private void seedIndicators() {
-        // The composite the predefined strategy uses: one indicator, two knobs.
-        Indicator crossover = seedIndicator(EMA_CROSSOVER_INDICATOR,
-                "{\"k\":{\"type\":\"int\",\"min\":1,\"max\":300},"
-                        + "\"d\":{\"type\":\"int\",\"min\":1,\"max\":300}}");
-        linkIndicatorParameterLink(crossover, "k", null, null, 1);
-        linkIndicatorParameterLink(crossover, "d", null, null, 2);
+        seedIndicator(EMA_CROSSOVER_INDICATOR, EMA_CROSSOVER_SCHEMA);
+        seedIndicator(EMA_AVERAGING_INDICATOR, EMA_AVERAGING_SCHEMA);
 
-        // Primitives, kept for the strategies that will use them. Both take
-        // `period`, from one catalog row, narrowed per indicator - which is why
-        // the link row carries the override columns.
-        Indicator ema = seedIndicator("EMA", "{\"period\":{\"type\":\"int\",\"min\":2,\"max\":300}}");
-        linkIndicatorParameterLink(ema, "period", "9", "{\"min\":2,\"max\":300}", 1);
-
-        Indicator rsi = seedIndicator("RSI", "{\"period\":{\"type\":\"int\",\"min\":2,\"max\":100}}");
-        linkIndicatorParameterLink(rsi, "period", "14", "{\"min\":2,\"max\":100}", 1);
+        // Primitives, for the templates that will use them singly.
+        seedIndicator("EMA", """
+                {"period":{"type":"int","min":2,"max":300,"default":9}}""");
+        seedIndicator("RSI", """
+                {"period":{"type":"int","min":2,"max":100,"default":14}}""");
     }
 
-    private Indicator seedIndicator(String name, String paramSchema) {
-        return indicatorRepository.findByName(name).orElseGet(() -> {
-            Indicator def = new Indicator();
-            def.setName(name);
-            def.setParamSchema(paramSchema);
-            def.setActive(true);
-            Indicator saved = indicatorRepository.save(def);
-            log.info("Seeded indicator '{}' id={}", name, saved.getId());
-            return saved;
-        });
-    }
-
-    /** Idempotent on UNIQUE (indicator_id, parameter_id). */
-    private void linkIndicatorParameterLink(Indicator indicator, String parameterCode,
-                                        String defaultOverride, String validationOverride, int order) {
-        if (indicatorParameterRepository
-                .findByIndicator_IdAndParameter_Code(indicator.getId(), parameterCode).isPresent()) {
+    /**
+     * Idempotent on {@code indicators.name}, and it CONVERGES the schema.
+     *
+     * The schema is the only declaration of what an indicator takes and what
+     * applies by default, so a platform retune has to be able to land here. It is
+     * safe to overwrite because user values live in their own rows: a key that
+     * disappears is rejected on the next write of a strategy that still sets it,
+     * rather than silently changing what anyone runs today.
+     */
+    private void seedIndicator(String name, String paramSchema) {
+        Indicator indicator = indicatorRepository.findByName(name).orElse(null);
+        if (indicator == null) {
+            indicator = new Indicator();
+            indicator.setName(name);
+            indicator.setParamSchema(paramSchema);
+            indicator.setActive(true);
+            log.info("Seeded indicator {} id={}", name, indicatorRepository.save(indicator).getId());
             return;
         }
-        Parameter parameter = parameterRepository.findByCode(parameterCode).orElseThrow(
-                () -> new IllegalStateException("Parameter catalog is missing '" + parameterCode + "'"));
-
-        IndicatorParameterLink link = new IndicatorParameterLink();
-        link.setIndicator(indicator);
-        link.setParameter(parameter);
-        link.setDefaultValue(defaultOverride);
-        link.setValidation(validationOverride);
-        link.setDisplayOrder(order);
-        link.setRequired(true);
-        indicatorParameterRepository.save(link);
-        log.info("Linked parameter '{}' to indicator '{}'", parameterCode, indicator.getName());
+        if (!paramSchema.equals(indicator.getParamSchema())) {
+            indicator.setParamSchema(paramSchema);
+            indicatorRepository.save(indicator);
+            log.info("Converged indicator {} onto the current parameter schema", name);
+        }
     }
 
-    // ------------------------------------------------------------- strategy
+    // ------------------------------------------------------------- templates
 
-    private void seedEmaCrossoverStrategy() {
-        StrategyTemplate strategy = strategyRepository.findByName(EMA_CROSSOVER).orElse(null);
-        if (strategy == null) {
-            strategy = new StrategyTemplate();
-            strategy.setName(EMA_CROSSOVER);
-            strategy.setDescription("Long when the fast leg crosses above the slow leg; "
-                    + "exit on the reverse cross or on SL/TP.");
-            strategy.setRuleTree(RULE_TREE);
-            strategy.setSystem(true);
-            strategy.setActive(true);
-            strategy = strategyRepository.save(strategy);
-            log.info("Seeded strategy '{}' id={}", EMA_CROSSOVER, strategy.getId());
+    private void seedTemplates() {
+        seedTemplate(EMA_CROSSOVER, EMA_CROSSOVER_TREE,
+                "Long when the fast leg crosses above the slow leg; exit on the reverse cross or on SL/TP.");
+        seedTemplate(EMA_AVERAGING, EMA_AVERAGING_TREE,
+                "EMA of the highs against a shorter signal leg, traded through options or the future, "
+                        + "with a configurable averaging ladder.");
+    }
+
+    private void seedTemplate(String name, String ruleTree, String description) {
+        StrategyTemplate template = templateRepository.findByName(name).orElse(null);
+        if (template == null) {
+            template = new StrategyTemplate();
+            template.setName(name);
+            template.setDescription(description);
+            template.setRuleTree(ruleTree);
+            template.setSystem(true);
+            template.setActive(true);
+            log.info("Seeded template {} id={}", name, templateRepository.save(template).getId());
             return;
         }
 
-        // An earlier build seeded this strategy against the EMA primitive with
-        // $fast/$slow bindings. Converge it onto the catalog model - but not while
-        // instances exist, because their signal params were hashed under the old
-        // knob set and rewriting the tree would strand them.
-        if (!RULE_TREE.equals(strategy.getRuleTree())) {
-            long instances = sharedConfigRepository.countByStrategy_Id(strategy.getId());
-            if (instances > 0) {
-                log.warn("Strategy template '{}' still uses the pre-catalog rule tree and has {} instance(s); "
-                        + "leaving it alone. Retire those instances to let it converge.",
-                        EMA_CROSSOVER, instances);
+        // Rewriting the tree decides which indicator rows a strategy carries, so it
+        // is only safe while nobody has built one. With strategies in place their
+        // indicator rows and hashed values were settled under the old tree, and
+        // moving it would strand them.
+        if (!ruleTree.equals(template.getRuleTree())) {
+            long strategies = userStrategyRepository.countByStrategy_Id(template.getId());
+            if (strategies > 0) {
+                log.warn("Template {} still uses an older rule tree and is used by {} strategy(ies); "
+                        + "leaving it alone.", name, strategies);
                 return;
             }
-            strategy.setRuleTree(RULE_TREE);
-            strategyRepository.save(strategy);
-            log.info("Converged strategy '{}' onto the catalog rule tree", EMA_CROSSOVER);
+            template.setRuleTree(ruleTree);
+            templateRepository.save(template);
+            log.info("Converged template {} onto the current rule tree", name);
         }
     }
 }

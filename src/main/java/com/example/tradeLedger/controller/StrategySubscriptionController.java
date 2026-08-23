@@ -5,6 +5,12 @@ import com.example.tradeLedger.dto.StrategySubscriptionResponse;
 import com.example.tradeLedger.dto.StrategySubscriptionUpdateRequest;
 import com.example.tradeLedger.service.StrategySubscriptionService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.ExampleObject;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.ExampleObject;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,33 +59,75 @@ public class StrategySubscriptionController extends SecuredController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    @Operation(summary = "Subscribe to a strategy with the caller's own parameters")
+    @Operation(summary = "Deploy a saved strategy onto one broker account",
+            description = "The configuration comes from the strategy, one foreign key away. "
+                    + "Only the per-account facts are in this body. For several accounts at "
+                    + "once use POST /api/v1/my-strategies/{id}/deploy.")
+    @io.swagger.v3.oas.annotations.parameters.RequestBody(
+            required = true,
+            content = @Content(schema = @Schema(implementation = StrategySubscriptionRequest.class),
+                    examples = {
+                            @ExampleObject(name = "Paper, default size",
+                                    value = """
+                                            { "userStrategyId": "us000000-1111-4222-8333-444444444444",
+                                              "tradingAccountId": "ta000000-1111-4222-8333-444444444444",
+                                              "tradeMode": "paper" }"""),
+                            @ExampleObject(name = "Live at double size, under a risk profile",
+                                    value = """
+                                            { "userStrategyId": "us000000-1111-4222-8333-444444444444",
+                                              "tradingAccountId": "ta000000-1111-4222-8333-444444444444",
+                                              "riskProfileId": "4f5e6d7c-8b9a-4c1d-9e2f-3a4b5c6d7e8f",
+                                              "multiplier": 2,
+                                              "capitalAllocated": 500000,
+                                              "executionMode": "CAPITAL_PERCENT",
+                                              "tradeMode": "live" }""")
+                    }))
     public StrategySubscriptionResponse create(@RequestBody StrategySubscriptionRequest request) {
         String email = currentEmail();
-        log.info("SUBSCRIBE request strategy='{}' | user={}",
-                request != null ? request.getStrategyName() : null, email);
+        log.info("DEPLOY strategy={} account={} | user={}",
+                request != null ? request.getUserStrategyId() : null,
+                request != null ? request.getTradingAccountId() : null, email);
         return subscriptionService.create(email, request);
     }
 
     /**
-     * Partial update. Parameters are merged over the current configuration, so
-     * {@code {"params":{"fast":13}}} is a valid body: signal-scope changes
-     * repoint the subscription at a different (possibly already shared) instance,
-     * execution-scope changes stay local, and {@code active} pauses or resumes
-     * without losing the configuration.
+     * Partial update of how THIS account runs the strategy - its size, its risk
+     * profile, paper or live, paused or not.
+     *
+     * Retuning the strategy itself is one PUT on /api/v1/my-strategies/{id},
+     * which every broker running it picks up at once.
      */
     @PutMapping("/{id}")
-    @Operation(summary = "Update parameters, sizing, mode or active state of a subscription")
+    @Operation(summary = "Update the sizing, mode or active state of one deployment",
+            description = "Only how THIS account runs the strategy. Retuning the strategy is "
+                    + "one PUT on /api/v1/my-strategies/{id}, which every broker follows.")
+    @io.swagger.v3.oas.annotations.parameters.RequestBody(
+            required = true,
+            content = @Content(schema = @Schema(implementation = StrategySubscriptionUpdateRequest.class),
+                    examples = {
+                            @ExampleObject(name = "Go live at double size",
+                                    value = """
+                                            { "tradeMode": "live", "multiplier": 2 }"""),
+                            @ExampleObject(name = "Pause this broker",
+                                    description = "Keeps the configuration. The shared computation "
+                                            + "is retired once its last active deployment pauses.",
+                                    value = """
+                                            { "active": false }"""),
+                            @ExampleObject(name = "Resume",
+                                    value = """
+                                            { "active": true }""")
+                    }))
     public StrategySubscriptionResponse update(@PathVariable UUID id,
                                                @RequestBody StrategySubscriptionUpdateRequest request) {
         String email = currentEmail();
-        log.info("UPDATE subscription={} keys={} | user={}",
-                id, request != null && request.getParams() != null ? request.getParams().keySet() : null, email);
+        log.info("UPDATE subscription={} | user={}", id, email);
         return subscriptionService.update(email, id, request);
     }
 
     @DeleteMapping("/{id}")
-    @Operation(summary = "Unsubscribe; retires the strategy instance if nobody else uses it")
+    @Operation(summary = "Withdraw from this broker",
+            description = "Retires the shared computation if this was its last active deployment. "
+                    + "The strategy itself is untouched and stays deployed elsewhere.")
     public ResponseEntity<Void> delete(@PathVariable UUID id) {
         String email = currentEmail();
         log.info("DELETE subscription={} | user={}", id, email);

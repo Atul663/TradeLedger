@@ -3,16 +3,25 @@ package com.example.tradeLedger.serviceImpl;
 import com.example.tradeLedger.dto.StrategySubscriptionRequest;
 import com.example.tradeLedger.dto.StrategySubscriptionResponse;
 import com.example.tradeLedger.dto.StrategySubscriptionUpdateRequest;
-import com.example.tradeLedger.entity.*;
+import com.example.tradeLedger.entity.RiskProfile;
+import com.example.tradeLedger.entity.SharedStrategyConfig;
+import com.example.tradeLedger.entity.StrategySubscription;
+import com.example.tradeLedger.entity.StrategyTemplate;
+import com.example.tradeLedger.entity.Symbol;
+import com.example.tradeLedger.entity.TradingAccount;
+import com.example.tradeLedger.entity.User;
+import com.example.tradeLedger.entity.UserBroker;
+import com.example.tradeLedger.entity.UserStrategy;
 import com.example.tradeLedger.exception.ResourceConflictException;
 import com.example.tradeLedger.exception.ResourceNotFoundException;
 import com.example.tradeLedger.exception.StrategyValidationException;
-import com.example.tradeLedger.repository.*;
+import com.example.tradeLedger.repository.RiskProfileRepository;
+import com.example.tradeLedger.repository.StrategySubscriptionRepository;
+import com.example.tradeLedger.repository.TradingAccountRepository;
+import com.example.tradeLedger.repository.UserStrategyRepository;
 import com.example.tradeLedger.service.CurrentUserService;
 import com.example.tradeLedger.service.SharedStrategyConfigService;
 import com.example.tradeLedger.service.StrategySubscriptionService;
-import com.example.tradeLedger.serviceImpl.StrategyParamValidator.ValidatedParams;
-import com.example.tradeLedger.utils.CanonicalJson;
 import com.example.tradeLedger.utils.JsonSupport;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,13 +29,20 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
+/**
+ * Deployments: which brokers a saved strategy is running on.
+ *
+ * Almost nothing is decided here any more. The configuration belongs to the
+ * strategy and is reached through a foreign key, so this service only owns the
+ * per-account facts - the account, the size multiplier, the risk profile, paper
+ * or live - and the rule that a strategy is deployed on an account once.
+ */
 @Service
 public class StrategySubscriptionServiceImpl implements StrategySubscriptionService {
 
@@ -40,37 +56,31 @@ public class StrategySubscriptionServiceImpl implements StrategySubscriptionServ
             StrategySubscription.EXEC_RISK_PERCENT);
 
     private final CurrentUserService currentUserService;
-    private final SharedStrategyConfigService sharedConfigService;
-    private final StrategyTemplateRepository strategyRepository;
-    private final StrategyParamDefinitionRepository paramDefRepository;
-    private final SymbolResolver symbolResolver;
+    private final UserStrategyRepository userStrategyRepository;
     private final TradingAccountRepository tradingAccountRepository;
     private final RiskProfileRepository riskProfileRepository;
     private final StrategySubscriptionRepository subscriptionRepository;
-    private final StrategyParamValidator paramValidator;
+    private final SharedStrategyConfigService sharedConfigService;
+    private final UserStrategyValidator validator;
     private final RuleTrees ruleTrees;
     private final JsonSupport json;
 
     public StrategySubscriptionServiceImpl(CurrentUserService currentUserService,
-                                           SharedStrategyConfigService sharedConfigService,
-                                           StrategyTemplateRepository strategyRepository,
-                                           StrategyParamDefinitionRepository paramDefRepository,
-                                           SymbolResolver symbolResolver,
+                                           UserStrategyRepository userStrategyRepository,
                                            TradingAccountRepository tradingAccountRepository,
                                            RiskProfileRepository riskProfileRepository,
                                            StrategySubscriptionRepository subscriptionRepository,
-                                           StrategyParamValidator paramValidator,
+                                           SharedStrategyConfigService sharedConfigService,
+                                           UserStrategyValidator validator,
                                            RuleTrees ruleTrees,
                                            JsonSupport json) {
         this.currentUserService = currentUserService;
-        this.sharedConfigService = sharedConfigService;
-        this.strategyRepository = strategyRepository;
-        this.paramDefRepository = paramDefRepository;
-        this.symbolResolver = symbolResolver;
+        this.userStrategyRepository = userStrategyRepository;
         this.tradingAccountRepository = tradingAccountRepository;
         this.riskProfileRepository = riskProfileRepository;
         this.subscriptionRepository = subscriptionRepository;
-        this.paramValidator = paramValidator;
+        this.sharedConfigService = sharedConfigService;
+        this.validator = validator;
         this.ruleTrees = ruleTrees;
         this.json = json;
     }
@@ -89,8 +99,7 @@ public class StrategySubscriptionServiceImpl implements StrategySubscriptionServ
     @Override
     @Transactional(readOnly = true)
     public StrategySubscriptionResponse get(String email, UUID id) {
-        User user = currentUserService.require(email);
-        return toResponse(requireOwned(user, id));
+        return toResponse(requireOwned(currentUserService.require(email), id));
     }
 
     // --------------------------------------------------------------- create
@@ -103,54 +112,48 @@ public class StrategySubscriptionServiceImpl implements StrategySubscriptionServ
             throw new StrategyValidationException("Request body is required");
         }
 
-        StrategyTemplate strategy = resolveStrategy(request);
+        UserStrategy strategy = requireOwnedStrategy(user, request.getUserStrategyId());
         if (!strategy.isActive()) {
-            throw new StrategyValidationException("StrategyTemplate is not active: " + strategy.getName());
+            throw new StrategyValidationException("Strategy " + strategy.getName()
+                    + " is archived; reactivate it before deploying");
         }
-        Symbol symbol = resolveSymbol(request);
+        if (!strategy.isDeployable()) {
+            throw new StrategyValidationException("Strategy " + strategy.getName()
+                    + " has no market yet - set symbol and candleDuration before deploying");
+        }
         TradingAccount account = requireOwnedAccount(user, request.getTradingAccountId());
-        RiskProfile riskProfile = resolveRiskProfile(request.getRiskProfileId());
-        String timeframe = Timeframes.normalize(request.getTimeframe());
-        String tradeMode = normalizeTradeMode(request.getTradeMode());
-        String executionMode = normalizeExecutionMode(request.getExecutionMode());
 
-        ValidatedParams params = validateParams(strategy, request.getParams());
-        assertRuleTreeResolves(strategy, params.getSignal());
-
-        SharedStrategyConfigService.Resolution resolution =
-                sharedConfigService.resolveOrCreate(strategy, symbol, timeframe, params.getSignal());
-        SharedStrategyConfig instance = resolution.instance();
-
-        // UNIQUE (shared_config_id, trading_account_id): the same math on the
-        // same account is the same leg, so it is an update, not a second row.
+        // UNIQUE (user_strategy_id, trading_account_id): the same strategy on the
+        // same account is the same deployment, so a repeat is an edit.
         StrategySubscription existing = subscriptionRepository
-                .findBySharedConfig_IdAndTradingAccount_Id(instance.getId(), account.getId())
+                .findByUserStrategy_IdAndTradingAccount_Id(strategy.getId(), account.getId())
                 .orElse(null);
         if (existing != null && existing.isActive()) {
-            throw new ResourceConflictException("Already subscribed to this exact configuration on account '"
-                    + account.getAccountName() + "' (subscriptionId=" + existing.getId()
+            throw new ResourceConflictException("Strategy " + strategy.getName()
+                    + " is already deployed on account " + account.getAccountName()
+                    + " (subscriptionId=" + existing.getId()
                     + "). Change it with PUT /api/v1/my-subscriptions/" + existing.getId() + ".");
         }
 
         StrategySubscription subscription = existing != null ? existing : new StrategySubscription();
         subscription.setUser(user);
-        subscription.setSharedConfig(instance);
+        subscription.setUserStrategy(strategy);
         subscription.setTradingAccount(account);
-        subscription.setRiskProfile(riskProfile);
-        subscription.setQuantity(orDefault(request.getQuantity(), BigDecimal.ONE));
+        subscription.setRiskProfile(resolveRiskProfile(request.getRiskProfileId()));
         subscription.setMultiplier(orDefault(request.getMultiplier(), BigDecimal.ONE));
-        subscription.setLotSize(request.getLotSize());
         subscription.setCapitalAllocated(request.getCapitalAllocated());
-        subscription.setExecutionMode(executionMode);
-        subscription.setExecParams(json.toJson(params.getExecution()));
-        subscription.setTradeMode(tradeMode);
+        subscription.setExecutionMode(normalizeExecutionMode(request.getExecutionMode()));
+        subscription.setTradeMode(normalizeTradeMode(request.getTradeMode()));
         subscription.setActive(true);
         subscriptionRepository.save(subscription);
 
-        log.info("SUBSCRIBE user={} strategy='{}' {} {} signal=[{}] exec=[{}] instance={} ({}) hash={}",
-                email, strategy.getName(), symbol.getSymbol(), timeframe,
-                CanonicalJson.describe(params.getSignal()), CanonicalJson.describe(params.getExecution()),
-                instance.getId(), resolution.created() ? "new" : "shared", instance.getConfigHash());
+        // A deployment is what keeps a shared computation scheduled, so the first
+        // one on a retired config brings it back.
+        sharedConfigService.reviveIfRetired(strategy.getSharedConfig());
+
+        log.info("DEPLOY user={} strategy={} account={} mode={} instance={}",
+                email, strategy.getName(), account.getAccountName(),
+                subscription.getTradeMode(), strategy.getSharedConfig().getId());
 
         return toResponse(subscription);
     }
@@ -159,72 +162,28 @@ public class StrategySubscriptionServiceImpl implements StrategySubscriptionServ
 
     @Override
     @Transactional
-    public StrategySubscriptionResponse update(String email, UUID id, StrategySubscriptionUpdateRequest request) {
+    public StrategySubscriptionResponse update(String email, UUID id,
+                                               StrategySubscriptionUpdateRequest request) {
         User user = currentUserService.require(email);
         StrategySubscription subscription = requireOwned(user, id);
         if (request == null) {
             throw new StrategyValidationException("Request body is required");
         }
 
-        SharedStrategyConfig current = subscription.getSharedConfig();
-        StrategyTemplate strategy = current.getStrategy();
-
-        // Submitted keys are merged over the current effective config, so a body
-        // of {"fast": 13} is valid and leaves every other knob untouched.
-        Map<String, Object> merged = new LinkedHashMap<>();
-        merged.putAll(json.toMap(current.getSignalParams()));
-        merged.putAll(json.toMap(subscription.getExecParams()));
-        if (request.getParams() != null) {
-            merged.putAll(request.getParams());
+        if (request.getMultiplier() != null) {
+            subscription.setMultiplier(request.getMultiplier());
         }
-
-        ValidatedParams params = validateParams(strategy, merged);
-        assertRuleTreeResolves(strategy, params.getSignal());
-
+        if (request.getCapitalAllocated() != null) {
+            subscription.setCapitalAllocated(request.getCapitalAllocated());
+        }
         if (request.getExecutionMode() != null) {
             subscription.setExecutionMode(normalizeExecutionMode(request.getExecutionMode()));
         }
         if (request.getTradeMode() != null) {
             subscription.setTradeMode(normalizeTradeMode(request.getTradeMode()));
         }
-        if (request.getQuantity() != null) {
-            subscription.setQuantity(request.getQuantity());
-        }
-        if (request.getMultiplier() != null) {
-            subscription.setMultiplier(request.getMultiplier());
-        }
-        if (request.getLotSize() != null) {
-            subscription.setLotSize(request.getLotSize());
-        }
-        if (request.getCapitalAllocated() != null) {
-            subscription.setCapitalAllocated(request.getCapitalAllocated());
-        }
         if (request.getRiskProfileId() != null) {
             subscription.setRiskProfile(resolveRiskProfile(request.getRiskProfileId()));
-        }
-        subscription.setExecParams(json.toJson(params.getExecution()));
-
-        SharedStrategyConfigService.Resolution resolution = sharedConfigService.resolveOrCreate(
-                strategy, current.getSymbol(), current.getTimeframe(), params.getSignal());
-        SharedStrategyConfig target = resolution.instance();
-        boolean repointed = !target.getId().equals(current.getId());
-
-        if (repointed) {
-            UUID accountId = subscription.getTradingAccount().getId();
-            subscriptionRepository.findBySharedConfig_IdAndTradingAccount_Id(target.getId(), accountId)
-                    .filter(other -> !other.getId().equals(subscription.getId()))
-                    .ifPresent(other -> {
-                        throw new ResourceConflictException("Account '"
-                                + subscription.getTradingAccount().getAccountName()
-                                + "' is already subscribed to that configuration (subscriptionId="
-                                + other.getId() + ")");
-                    });
-
-            if (resolution.created() && target.getSupersedes() == null) {
-                target.setSupersedes(current);
-            }
-            subscription.setSharedConfig(target);
-            subscription.setVersion(subscription.getVersion() + 1);
         }
 
         boolean activeChanged = request.getActive() != null && request.getActive() != subscription.isActive();
@@ -233,25 +192,16 @@ public class StrategySubscriptionServiceImpl implements StrategySubscriptionServ
         }
         subscriptionRepository.save(subscription);
 
-        if (repointed) {
-            sharedConfigService.retireIfOrphaned(current.getId());
-            log.info("REPOINT user={} subscription={} instance {} -> {} ({}) signal=[{}]",
-                    email, id, current.getId(), target.getId(),
-                    resolution.created() ? "new" : "shared", CanonicalJson.describe(params.getSignal()));
-        }
         if (activeChanged) {
+            SharedStrategyConfig config = subscription.getUserStrategy().getSharedConfig();
             if (subscription.isActive()) {
-                sharedConfigService.reviveIfRetired(subscription.getSharedConfig());
+                sharedConfigService.reviveIfRetired(config);
             } else {
-                sharedConfigService.retireIfOrphaned(subscription.getSharedConfig().getId());
+                subscriptionRepository.flush();
+                sharedConfigService.retireIfOrphaned(config.getId());
             }
-            log.info("{} user={} subscription={}", subscription.isActive() ? "ACTIVATE" : "PAUSE", email, id);
+            log.info("{} user={} subscription={}", subscription.isActive() ? "RESUME" : "PAUSE", email, id);
         }
-        if (!repointed && !activeChanged) {
-            log.info("UPDATE user={} subscription={} exec=[{}]",
-                    email, id, CanonicalJson.describe(params.getExecution()));
-        }
-
         return toResponse(subscription);
     }
 
@@ -262,12 +212,14 @@ public class StrategySubscriptionServiceImpl implements StrategySubscriptionServ
     public void delete(String email, UUID id) {
         User user = currentUserService.require(email);
         StrategySubscription subscription = requireOwned(user, id);
-        UUID instanceId = subscription.getSharedConfig().getId();
+        SharedStrategyConfig config = subscription.getUserStrategy().getSharedConfig();
 
         subscriptionRepository.delete(subscription);
         subscriptionRepository.flush();
-        sharedConfigService.retireIfOrphaned(instanceId);
-        log.info("UNSUBSCRIBE user={} subscription={}", email, id);
+        if (config != null) {
+            sharedConfigService.retireIfOrphaned(config.getId());
+        }
+        log.info("WITHDRAW user={} subscription={}", email, id);
     }
 
     // ------------------------------------------------------------ resolving
@@ -275,6 +227,14 @@ public class StrategySubscriptionServiceImpl implements StrategySubscriptionServ
     private StrategySubscription requireOwned(User user, UUID id) {
         return subscriptionRepository.findByIdAndUser_Id(id, user.getId())
                 .orElseThrow(() -> ResourceNotFoundException.of("Subscription", id));
+    }
+
+    private UserStrategy requireOwnedStrategy(User user, UUID strategyId) {
+        if (strategyId == null) {
+            throw new StrategyValidationException("userStrategyId is required");
+        }
+        return userStrategyRepository.findByIdAndUser_Id(strategyId, user.getId())
+                .orElseThrow(() -> ResourceNotFoundException.of("Strategy", strategyId));
     }
 
     private TradingAccount requireOwnedAccount(User user, UUID accountId) {
@@ -289,23 +249,6 @@ public class StrategySubscriptionServiceImpl implements StrategySubscriptionServ
         return account;
     }
 
-    private StrategyTemplate resolveStrategy(StrategySubscriptionRequest request) {
-        if (request.getStrategyId() != null) {
-            return strategyRepository.findById(request.getStrategyId())
-                    .orElseThrow(() -> ResourceNotFoundException.of("Strategy template", request.getStrategyId()));
-        }
-        if (request.getStrategyName() != null && !request.getStrategyName().isBlank()) {
-            String name = request.getStrategyName().trim();
-            return strategyRepository.findByName(name)
-                    .orElseThrow(() -> ResourceNotFoundException.of("Strategy template", name));
-        }
-        throw new StrategyValidationException("strategyId or strategyName is required");
-    }
-
-    private Symbol resolveSymbol(StrategySubscriptionRequest request) {
-        return symbolResolver.require(request.getSymbolId(), request.getSymbol(), request.getExchangeCode());
-    }
-
     private RiskProfile resolveRiskProfile(UUID riskProfileId) {
         if (riskProfileId == null) {
             return null;
@@ -313,19 +256,6 @@ public class StrategySubscriptionServiceImpl implements StrategySubscriptionServ
         return riskProfileRepository.findById(riskProfileId)
                 .orElseThrow(() -> ResourceNotFoundException.of("Risk profile", riskProfileId));
     }
-
-    // ----------------------------------------------------------- validation
-
-    private ValidatedParams validateParams(StrategyTemplate strategy, Map<String, Object> submitted) {
-        List<StrategyParamDefinition> defs =
-                paramDefRepository.findByStrategy_IdOrderByDisplayOrderAscParameterKeyAsc(strategy.getId());
-        return paramValidator.validate(defs, submitted);
-    }
-
-    private void assertRuleTreeResolves(StrategyTemplate strategy, Map<String, Object> signalParams) {
-        ruleTrees.assertResolves(strategy, signalParams);
-    }
-
 
     private String normalizeTradeMode(String tradeMode) {
         if (tradeMode == null || tradeMode.isBlank()) {
@@ -355,11 +285,17 @@ public class StrategySubscriptionServiceImpl implements StrategySubscriptionServ
 
     // -------------------------------------------------------------- mapping
 
+    /**
+     * The configuration fields are read THROUGH the strategy, not from a copy on
+     * this row - which is why a retune shows up on every deployment at once.
+     */
     private StrategySubscriptionResponse toResponse(StrategySubscription subscription) {
-        SharedStrategyConfig instance = subscription.getSharedConfig();
-        StrategyTemplate strategy = instance.getStrategy();
-        Symbol symbol = instance.getSymbol();
+        UserStrategy strategy = subscription.getUserStrategy();
+        StrategyTemplate template = strategy.getStrategy();
+        Symbol symbol = strategy.getSymbol();
+        SharedStrategyConfig config = strategy.getSharedConfig();
         TradingAccount account = subscription.getTradingAccount();
+        UserBroker broker = account.getUserBroker();
         RiskProfile riskProfile = subscription.getRiskProfile();
 
         return new StrategySubscriptionResponse(
@@ -367,31 +303,35 @@ public class StrategySubscriptionServiceImpl implements StrategySubscriptionServ
                 subscription.getUser().getId(),
                 strategy.getId(),
                 strategy.getName(),
-                instance.getId(),
-                instance.getConfigHash(),
-                symbol.getId(),
-                symbol.getSymbol(),
-                instance.getTimeframe(),
-                json.toMap(instance.getSignalParams()),
-                json.toMap(subscription.getExecParams()),
-                resolveIndicators(strategy, instance),
+                template.getId(),
+                template.getName(),
+                symbol != null ? symbol.getId() : null,
+                symbol != null ? symbol.getSymbol() : null,
+                strategy.getCandleDuration(),
+                strategy.getDerivative().name(),
+                validator.legs(strategy),
+                strategy.getLotRule().name(),
+                strategy.getBaseLot(),
+                strategy.getAveragingCount(),
+                strategy.getSlPct(),
+                strategy.getTpPct(),
+                config != null ? config.getId() : null,
+                config != null ? config.getConfigHash() : null,
+                config != null ? json.toMap(config.getSignalParams()) : Map.of(),
+                config != null ? ruleTrees.indicators(template, json.readTree(config.getSignalParams()))
+                        : List.of(),
                 account.getId(),
                 account.getAccountName(),
+                broker.getId(),
+                broker.getLabel(),
                 riskProfile != null ? riskProfile.getId() : null,
                 riskProfile != null ? riskProfile.getName() : null,
-                subscription.getQuantity(),
                 subscription.getMultiplier(),
-                subscription.getLotSize(),
                 subscription.getCapitalAllocated(),
                 subscription.getExecutionMode(),
                 subscription.getTradeMode(),
                 subscription.isActive(),
-                subscription.getVersion(),
                 subscription.getCreatedAt(),
                 subscription.getUpdatedAt());
-    }
-
-    private List<String> resolveIndicators(StrategyTemplate strategy, SharedStrategyConfig sharedConfig) {
-        return ruleTrees.indicators(strategy, json.readTree(sharedConfig.getSignalParams()));
     }
 }
