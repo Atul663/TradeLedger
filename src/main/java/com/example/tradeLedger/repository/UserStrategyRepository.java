@@ -23,4 +23,7 @@ public interface UserStrategyRepository extends JpaRepository<UserStrategy, UUID
 
     /** Guards template deletion: a template customized by users is still in use. */
     long countByStrategy_Id(UUID strategyId);
+
+    /** Guards symbol deletion: an underlying somebody's strategy watches is still in use. */
+    long countBySymbol_Id(UUID symbolId);
 }

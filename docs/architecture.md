@@ -607,7 +607,7 @@ All strategy-module endpoints require `Authorization: Bearer <accessToken>`.
 | POST | `/api/v1/my-brokers/setup` | Wizard: setup + first account + key in one transaction |
 | GET/PUT/DELETE | `/api/v1/my-brokers/{id}`, `/{id}/credentials` | |
 | GET/PUT/DELETE | `/api/v1/trading-accounts/{id}`, `/{id}/credentials` | Masked on read; PUT is partial; `""` clears |
-| GET | `/api/v1/exchanges`, `/symbols`, `/risk-profiles` | Reference data, read-only |
+| GET/POST/PUT/DELETE | `/api/v1/exchanges`, `/symbols`, `/risk-profiles` | Reference data. **Shared master data** — writes are not role-gated; deletes are refused while referenced |
 | GET/POST/PUT/DELETE | `/api/v1/brokers` | The broker catalog. **Shared master data** — writes are not role-gated yet |
 | GET/PUT | `/api/v1/me/risk-limits` | Aggregate caps |
 | GET/POST/PUT/DELETE | `/api/v1/strategy-toggles/...` | Legacy platform switches, unrelated to templates |
@@ -655,3 +655,19 @@ foreign resource is a 404 rather than a 403 — the API does not confirm it exis
    very first request is a read would need an INSERT on a read-only connection.
    Unreachable in practice (a read of your own rows implies you have some), but
    the safe fix is `REQUIRES_NEW` on `require()`.
+
+9. **Shared master data has write endpoints but no authorization.** `brokers`,
+   `exchanges`, `symbols` and `risk_profiles` have no owner column, so any
+   authenticated caller can create and edit rows every other user depends on.
+   There is no role model in this API layer to gate that with. What stands in for
+   it is structural, and it bounds the damage rather than preventing the write:
+
+   - a delete is **refused while anything references the row** (409 with the
+     count), so no write here can break a saved configuration;
+   - identity columns freeze once referenced — an exchange's `code` cannot change
+     while it has symbols, and a symbol cannot move between exchanges;
+   - deactivating is always available and is the documented alternative to
+     deleting.
+
+   The worst case is therefore additive clutter, not data loss. A real fix is a
+   role claim in the JWT and an admin check on these six controllers.

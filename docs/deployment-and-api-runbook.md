@@ -6,7 +6,7 @@ response for every call.
 
 - [0. Read this before deploying](#0-read-this-before-deploying)
 - [1. Deploy](#1-deploy)
-- [2. Seed reference data (SQL — no write API)](#2-seed-reference-data-sql--no-write-api)
+- [2. Seed reference data](#2-seed-reference-data)
 - [3. Get a token](#3-get-a-token)
 - [4. Broker catalog](#4-broker-catalog)
 - [5. Broker setup and trading accounts](#5-broker-setup-and-trading-accounts)
@@ -157,11 +157,93 @@ Swagger UI: `{{BASE}}/swagger-ui.html`.
 
 ---
 
-## 2. Seed reference data (SQL — no write API)
+## 2. Seed reference data
 
-`exchanges`, `symbols` and `risk_profiles` are **read-only over HTTP**
-(`GET` only). A strategy cannot pick an underlying that does not exist, so seed
-them first.
+A strategy cannot pick an underlying that does not exist, so create these first.
+Either the API (§2.1) or SQL (§2.2) — the API is easier for a handful of rows,
+SQL is better for a bulk load from an instrument feed.
+
+> **These three tables have no owner column.** Anything written here is visible
+> to every user, and the writes are not scoped to the caller — there is no role
+> model in this API layer to gate them with. The protection is structural
+> instead: **a delete is refused while anything references the row**, identity
+> columns freeze once they are referenced, and deactivating is always available.
+> That makes the worst case additive clutter rather than data loss. It is not a
+> substitute for authorization — see gap 9 in the architecture doc.
+
+### 2.1 Through the API
+
+```http
+POST {{BASE}}/api/v1/exchanges
+Authorization: Bearer {{TOKEN}}
+
+{ "name": "National Stock Exchange of India",
+  "code": "NSE",
+  "description": "Indian equity and derivatives",
+  "status": "active" }
+```
+
+**201** — an `ExchangeResponse`. `code` is uppercased on save and is what a
+strategy later sends as `exchangeCode`; both `name` and `code` are UNIQUE.
+
+```http
+POST {{BASE}}/api/v1/symbols
+
+{ "exchangeCode": "NSE",
+  "symbol": "NIFTY",
+  "baseAsset": "NIFTY",
+  "quoteAsset": "INR",
+  "instrumentType": "index",
+  "contractSize": 75,
+  "tickSize": 0.05,
+  "minQty": 75,
+  "active": true }
+```
+
+**201** — a `SymbolResponse`. `exchangeId` may be sent instead of
+`exchangeCode`. The ticker is uppercased and is UNIQUE per exchange.
+
+```http
+POST {{BASE}}/api/v1/risk-profiles
+
+{ "name": "Conservative",
+  "description": "Tight daily stop, small size",
+  "maxDailyLoss": 5000,
+  "maxDrawdown": 10000,
+  "maxPositionSize": 100000,
+  "maxTotalExposure": 500000,
+  "maxTradesPerDay": 10,
+  "killSwitchEnabled": true }
+```
+
+**201** — a `RiskProfileResponse`. Every cap is optional; an absent one means
+uncapped.
+
+| Method | Path | Notes |
+|---|---|---|
+| POST/PUT/DELETE | `/api/v1/exchanges`, `/{id}` | DELETE is 409 while any symbol belongs to it; `code` freezes once symbols exist |
+| POST/PUT/DELETE | `/api/v1/symbols`, `/{id}` | DELETE is 409 while any strategy watches it; a symbol cannot change exchange |
+| POST/PUT/DELETE | `/api/v1/risk-profiles`, `/{id}` | DELETE is 409 while any deployment runs under it |
+
+PUT is partial on all three. The rules a form should mirror:
+
+| Rule | Message |
+|---|---|
+| Missing exchange code | `code is required` |
+| Bad exchange status | `status must be one of [active, disabled], got paused` |
+| Bad instrument type | `instrumentType must be one of [...], got perpetual` |
+| Option with no side | `optionType is required when instrumentType is option (CALL or PUT)` |
+| Option with no strike | `strikePrice is required when instrumentType is option` |
+| Option fields on a non-option | `optionType only applies when instrumentType is option, not index` |
+| Non-positive measure | `contractSize must be greater than 0, got 0` |
+| Negative cap | `maxDailyLoss must not be negative, got -1` |
+| Zero trades per day | `maxTradesPerDay must be at least 1, got 0` |
+| Recode a referenced exchange | `Exchange NSE has 3 symbol(s); its code is what clients resolve them by and cannot change underneath them.` |
+
+### 2.2 Through SQL
+
+Better for a bulk load. Note this bypasses the validation above, so the
+instrument-type and option-field rules are yours to keep.
 
 > Lot sizes below are placeholders. Set `contract_size` / `min_qty` from the
 > current exchange contract specification — they change.

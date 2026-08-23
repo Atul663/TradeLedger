@@ -14,4 +14,8 @@ public interface ExchangeRepository extends JpaRepository<Exchange, UUID> {
     List<Exchange> findByStatusOrderByNameAsc(String status);
 
     List<Exchange> findAllByOrderByNameAsc();
+
+    boolean existsByCode(String code);
+
+    boolean existsByName(String name);
 }

@@ -38,7 +38,8 @@ class SwaggerExamplesTest {
             StrategySubscriptionController.class,
             UserBrokerController.class,
             StrategyTemplateController.class,
-            IndicatorController.class);
+            IndicatorController.class,
+            ReferenceDataController.class);
 
     /** DTOs whose @Schema examples are JSON objects rather than scalars. */
     private static final List<Class<?>> JSON_EXAMPLE_TYPES = List.of(
@@ -53,7 +54,10 @@ class SwaggerExamplesTest {
             com.example.tradeLedger.dto.SharedStrategyConfigResponse.class,
             com.example.tradeLedger.dto.IndicatorPlanResponse.class,
             com.example.tradeLedger.dto.StrategySubscriptionResponse.class,
-            com.example.tradeLedger.dto.ApiError.class);
+            com.example.tradeLedger.dto.ApiError.class,
+            com.example.tradeLedger.dto.ExchangeRequest.class,
+            com.example.tradeLedger.dto.SymbolRequest.class,
+            com.example.tradeLedger.dto.RiskProfileRequest.class);
 
     @Test
     void everyRequestBodyExampleIsValidJson() {
@@ -164,6 +168,9 @@ class SwaggerExamplesTest {
         assertHasExamples(UserStrategyController.class, "deploy");
         assertHasExamples(StrategySubscriptionController.class, "create");
         assertHasExamples(UserBrokerController.class, "setup");
+        assertHasExamples(ReferenceDataController.class, "createExchange");
+        assertHasExamples(ReferenceDataController.class, "createSymbol");
+        assertHasExamples(ReferenceDataController.class, "createRiskProfile");
     }
 
     private void assertHasExamples(Class<?> controller, String methodName) {
