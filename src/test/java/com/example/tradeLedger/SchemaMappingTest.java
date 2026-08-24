@@ -43,7 +43,7 @@ class SchemaMappingTest {
     private static final List<Class<?>> ENTITIES = List.of(
             User.class, Exchange.class, Symbol.class, Broker.class, UserBroker.class,
             TradingAccount.class, BrokerCredential.class, RiskProfile.class, UserRiskLimit.class,
-            Indicator.class, StrategyTemplate.class, SharedStrategyConfig.class,
+            Indicator.class, FixedParameter.class, StrategyTemplate.class, SharedStrategyConfig.class,
             UserStrategy.class, UserStrategyIndicator.class, StrategySubscription.class,
             GoogleAuthToken.class, PlatformStrategyToggle.class);
 
@@ -168,6 +168,33 @@ class SchemaMappingTest {
                 "strategy_parameter_links", "strategy_indicator_links",
                 "strategy_param_definitions", "user_strategy_parameters", "user_strategy_legs")) {
             assertFalse(tables.contains(dropped), dropped + " is back in the schema");
+        }
+    }
+
+    /**
+     * fixed_parameters describes the fixed knobs; it must never come to HOLD one.
+     *
+     * The line between this table and the catalog above is that no user row hangs
+     * off it and no value is resolved through it. A user or strategy foreign key
+     * here, or a custom_value column, would be that catalog again under a new
+     * name - so the absence is asserted rather than left to review.
+     */
+    @Test
+    void fixedParametersDescribesKnobsWithoutHoldingAnyValue() {
+        Table table = table(metadata(), FixedParameter.class);
+        Set<String> columns = columns(table);
+
+        assertEquals("fixed_parameters", table.getName());
+        for (String descriptor : List.of("name", "label", "data_type", "default_value",
+                "validation", "param_group", "display_order")) {
+            assertTrue(columns.contains(descriptor),
+                    "fixed_parameters is missing " + descriptor + ": " + columns);
+        }
+        for (String value : List.of("user_id", "user_strategy_id", "strategy_id",
+                "indicator_id", "custom_value", "parameter_id")) {
+            assertFalse(columns.contains(value),
+                    "fixed_parameters holds " + value + " - it is a descriptor catalog, "
+                            + "not a value store");
         }
     }
 }

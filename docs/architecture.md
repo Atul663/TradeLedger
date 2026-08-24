@@ -213,6 +213,39 @@ never touches a knob); optional `min` / `max` (numeric), `options` (non-empty
 list, required for `enum`), and `gt` / `lt` naming a sibling key for a cross-field
 rule.
 
+### `fixed_parameters` — how the fixed knobs are described (`FixedParameter.java`)
+
+**A descriptor catalog, not a value store.** `indicators.param_schema` says what
+the pluggable half of a strategy takes; this says the same about the fixed half —
+the label, type, suggested default and bounds of each knob that is a **typed
+column** on `user_strategies` or `user_strategy_subscriptions`.
+
+| Column | Stores |
+|---|---|
+| `id` | UUID PK |
+| `name` | `slPct`, `baseLot`, `candleDuration`. UNIQUE case-insensitively. By convention **the API field name of the column it describes**, so a form binds the two by string equality |
+| `label` | `Stop loss %` |
+| `description` | Help text |
+| `data_type` | `int · decimal · bool · enum · timeframe · text` |
+| `scope` | `signal` / `execution` — whether the knob is part of a strategy's shared identity |
+| `default_value` | text, coerced by `data_type`. What a form **pre-fills**, not what the engine applies |
+| `validation` | jsonb. `{"min":0,"max":100}`, or `{"options":[...]}` which an `enum` requires. Mirrors the CHECK constraint on the column |
+| `param_group`, `display_order` | Which section of the form, and where in it |
+| `is_required`, `is_active` | Whether a form must demand it; whether it is shown at all |
+
+Nothing reads this table to decide what a strategy runs with. The value of every
+knob it describes is the column, with the column's own default and CHECK
+constraint behind it — emptying `fixed_parameters` changes nothing but how a form
+renders. `SchemaMappingTest` pins that: a `user_id`, a `custom_value` or a
+`parameter_id` here would be the catalog of §5 again under a new name, and the
+absence is asserted rather than left to review.
+
+`default_value` is validated against `data_type` and `validation` on write, so an
+`int` knob cannot pre-fill `none`, a `decimal` cannot sit outside its own
+`min`/`max`, and an `enum` default has to be one of its options. A `timeframe`
+default goes through the same `Timeframes` normalizer a strategy's does, so `5M`
+stores as `5m`.
+
 ### `strategy_templates` — the logic (`StrategyTemplate.java`)
 
 | Column | Stores |
@@ -365,12 +398,32 @@ What was given up, and what replaced it:
 | Lost | Replacement |
 |---|---|
 | Admin retunes a global default, every non-overriding user moves | `indicators.param_schema` defaults do exactly this for indicator values; the seeder converges them on boot |
-| Forms rendering themselves from `params[]` | `GET /strategy-templates/{id}` carries each indicator's `paramSchema`; the fixed fields are the same on every template and are built once |
+| Forms rendering themselves from `params[]` | `GET /strategy-templates/{id}` carries each indicator's `paramSchema`; `fixed_parameters` describes the fixed fields, which are the same on every template |
 | A new execution knob without a migration | A migration. It is a column now — which is the point |
 
 `strategy_indicator_links` went too, and it was not a trade-off: it was a *derived
 cache* of what the rule tree already said. Reading the tree directly is the only
 way the two can never disagree.
+
+### What `fixed_parameters` is, and why it is not that catalog coming back
+
+The one thing genuinely lost above was a form that renders itself: the fixed
+fields had labels, types and defaults hardcoded in whatever client drew them, and
+rewording a label or retuning a suggested default meant a frontend deploy.
+`fixed_parameters` gives those back — and stops there.
+
+| | `parameters` (dropped) | `fixed_parameters` |
+|---|---|---|
+| Holds | user **values**, as `text` rows | **descriptors** — label, type, default, bounds |
+| Reached from a user row | yes, via `user_strategy_parameters` and two link tables | never — nothing has a foreign key to it |
+| Read to decide what runs | yes, through a COALESCE chain | no |
+| Effect of deleting every row | users lose their configuration | forms lose their labels |
+
+The failure of the old model was the same fact living in a key/value row *and* a
+column. Here the fact lives in the column, and this table holds only what the
+column could never say about itself. Which is also its limit: it cannot express a
+repeating group either, and it is not where a new knob goes — a new knob is still
+a migration and a column, plus a row here to describe it.
 
 ---
 
@@ -560,8 +613,8 @@ succeeds.
 
 ### Seeding (`ControlPlaneSeeder`)
 
-An `ApplicationRunner`, idempotent on `indicators.name` and
-`strategy_templates.name`:
+An `ApplicationRunner`, idempotent on `indicators.name`,
+`strategy_templates.name` and `fixed_parameters.name`:
 
 | Indicator | Schema |
 |---|---|
@@ -574,11 +627,24 @@ An `ApplicationRunner`, idempotent on `indicators.name` and
 | `EMA Crossover` | `{"entry":{"ind":"EMA CROSSOVER","params":{"k":"$k","d":"$d"}}}` |
 | `EMA Averaging` | `{"entry":{"ind":"EMA AVERAGING","params":{"k":"$k","d":"$d"}}}` |
 
+| Fixed-parameter group | Descriptors |
+|---|---|
+| `market` | `candleDuration` (signal scope), `triggerDuration` |
+| `instrument` | `derivative`, `ceEnabled` / `ceMoneyness` / `ceStrikeOffset`, and the `pe` three |
+| `sizing` | `lotRule`, `baseLot`, `averagingCount` |
+| `exits` | `slPct`, `tpPct` |
+| `deployment` | `executionMode`, `multiplier`, `capitalAllocated`, `tradeMode` |
+
 Schemas **converge** on every boot — they are the only declaration of what applies
 by default, so a platform retune has to be able to land. Rule trees converge only
 while no user strategy exists on that template; otherwise it logs a WARN and
 leaves the row alone, because rewriting the tree would strand indicator rows that
 were settled under the old one.
+
+Fixed parameters are the exception: **insert-only, never converged**. Nothing
+reads them to decide what anyone runs, and `/api/v1/fixed-parameters` is the
+intended way to reword a label or retune a suggested default — so converging on
+boot would silently undo an admin's edit on the next deploy.
 
 ---
 
@@ -591,11 +657,15 @@ All strategy-module endpoints require `Authorization: Bearer <accessToken>`.
 | GET | `/api/v1/indicators?active=` | List, each with its `paramSchema` |
 | GET | `/api/v1/indicators/{id}`, `/by-name/{name}` | Name is uppercased before lookup |
 | POST/PUT/DELETE | `/api/v1/indicators`, `/{id}` | Rename and delete blocked while referenced |
+| GET | `/api/v1/fixed-parameters?group=&scope=&active=` | The fixed knobs' labels, types, defaults and bounds, ordered as a form lays them out |
+| GET | `/api/v1/fixed-parameters/{id}`, `/by-name/{name}` | Name matched case-insensitively |
+| POST/PUT/DELETE | `/api/v1/fixed-parameters`, `/{id}` | **Descriptors, not values** — nothing here changes what a strategy runs with. `defaultValue` is parsed against `dataType` and `validation` on write |
 | GET | `/api/v1/strategy-templates?active=&search=` | The template + its indicators' schemas |
 | GET | `/api/v1/strategy-templates/{id}`, `/by-name/{name}` | |
 | POST | `/api/v1/strategy-templates` | 201, `is_system` forced false |
 | PUT / DELETE | `/api/v1/strategy-templates/{id}` | 409 on system rows; rule tree frozen once strategies exist |
 | GET/POST | `/api/v1/my-strategies` | The caller's strategies, ownership-filtered |
+| GET | `/api/v1/my-strategies/grouped?active=&strategyId=` | The same rows, one group per template, each tagged with its `strategyName` |
 | GET/PUT/DELETE | `/api/v1/my-strategies/{id}` | Editor shape. Another user's row reports **404, not 403** |
 | GET | `/api/v1/my-strategies/{id}/runtime` | Bot shape: legs resolved, values coerced |
 | POST | `/api/v1/my-strategies/{id}/deploy` | **Fan out to many brokers**, per-target outcome |

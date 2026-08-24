@@ -4,6 +4,7 @@ import com.example.tradeLedger.dto.StrategyDeployRequest;
 import com.example.tradeLedger.dto.StrategyDeploymentResponse;
 import com.example.tradeLedger.dto.StrategySubscriptionRequest;
 import com.example.tradeLedger.dto.StrategySubscriptionResponse;
+import com.example.tradeLedger.dto.UserStrategyGroupResponse;
 import com.example.tradeLedger.dto.UserStrategyIndicatorResponse;
 import com.example.tradeLedger.dto.UserStrategyRequest;
 import com.example.tradeLedger.dto.UserStrategyResponse;
@@ -41,6 +42,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -107,6 +109,45 @@ public class UserStrategyServiceImpl implements UserStrategyService {
     @Override
     @Transactional(readOnly = true)
     public List<UserStrategyResponse> list(String email, Boolean active, UUID strategyId) {
+        return ownedRows(email, active, strategyId).stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<UserStrategyGroupResponse> listGrouped(String email, Boolean active, UUID strategyId) {
+        // Insertion-ordered so the rows inside each group keep the flat list's
+        // oldest-first order; the GROUPS are then sorted by the name they are
+        // tagged with, which is the order a list screen reads them in.
+        Map<UUID, List<UserStrategy>> byTemplate = new LinkedHashMap<>();
+        for (UserStrategy row : ownedRows(email, active, strategyId)) {
+            byTemplate.computeIfAbsent(row.getStrategy().getId(), key -> new ArrayList<>()).add(row);
+        }
+
+        List<UserStrategyGroupResponse> groups = new ArrayList<>(byTemplate.size());
+        for (List<UserStrategy> rows : byTemplate.values()) {
+            // Every row in the group came from the same template, so any of them
+            // can supply the tag.
+            StrategyTemplate template = rows.get(0).getStrategy();
+            groups.add(new UserStrategyGroupResponse(
+                    template.getId(),
+                    template.getName(),
+                    template.getDescription(),
+                    rows.size(),
+                    rows.stream().map(this::toResponse).toList()));
+        }
+        groups.sort(Comparator.comparing(UserStrategyGroupResponse::strategyName,
+                String.CASE_INSENSITIVE_ORDER));
+        return groups;
+    }
+
+    /**
+     * The caller's strategies under both filters, oldest first - the one fetch the
+     * flat and grouped shapes share, so they can never disagree about which rows
+     * the caller has.
+     */
+    private List<UserStrategy> ownedRows(String email, Boolean active, UUID strategyId) {
         User user = currentUserService.require(email);
 
         List<UserStrategy> rows;
@@ -121,7 +162,6 @@ public class UserStrategyServiceImpl implements UserStrategyService {
         // so the archive flag is applied here rather than growing a third method.
         return rows.stream()
                 .filter(row -> active == null || row.isActive() == active)
-                .map(this::toResponse)
                 .toList();
     }
 

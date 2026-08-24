@@ -578,6 +578,73 @@ narrowing the schema is 400 if a live tree still passes a dropped key.
 `DELETE` is 409 while a rule tree references it **or** any user strategy is tuned
 on it.
 
+### The fixed half of the same form
+
+`paramSchema` describes the knobs of the one pluggable thing on the platform.
+Every *other* setting a strategy has — the candle, the derivative, the strikes,
+the ladder, the exits, the deployment sizing — is a **typed column**, and
+`/api/v1/fixed-parameters` is where those columns describe themselves to a form:
+label, type, default to pre-fill, bounds to enforce, and where the field sits.
+
+**Descriptors, not values.** Nothing here is read to decide what a strategy runs
+with — the values are written through `/api/v1/my-strategies` and
+`/api/v1/my-subscriptions` as always. Emptying this catalog changes nothing but
+how a form renders.
+
+```http
+GET {{BASE}}/api/v1/fixed-parameters?group=exits&active=true
+```
+
+**200** — ordered by group, then position within it, then name.
+
+```json
+[ { "id": "f1000000-0000-0000-0000-000000000001",
+    "name": "slPct",
+    "label": "Stop loss %",
+    "description": "Percent move against the position that closes it.",
+    "dataType": "decimal",
+    "scope": "execution",
+    "defaultValue": "2.5",
+    "validation": { "min": 0, "max": 100 },
+    "paramGroup": "exits",
+    "displayOrder": 1,
+    "required": false,
+    "active": true,
+    "createdAt": "2026-08-24T11:02:44.118+05:30",
+    "updatedAt": "2026-08-24T11:02:44.118+05:30" } ]
+```
+
+Seeded groups: `market`, `instrument`, `sizing`, `exits`, `deployment` — one
+descriptor per fixed column. Unlike indicator schemas, seeding is **insert-only**:
+a row you edit here survives the next deploy.
+
+```http
+GET  {{BASE}}/api/v1/fixed-parameters/by-name/slPct
+POST {{BASE}}/api/v1/fixed-parameters
+{ "name": "trailStopPct", "label": "Trailing stop %", "dataType": "decimal",
+  "scope": "execution", "defaultValue": "1.5",
+  "validation": { "min": 0, "max": 100 },
+  "paramGroup": "exits", "displayOrder": 3 }
+```
+
+`defaultValue` is text whatever the type is, and is **parsed against `dataType`
+and `validation` on save** — an `int` default that is not an integer, a `decimal`
+outside its own `min`/`max`, or an `enum` default that is not one of its
+`options` are all 400. `options` is required for an `enum` and rejected for
+anything else; `min`/`max` apply only to `int` and `decimal`. A `timeframe`
+default goes through the same normalizer a strategy's does, so `5M` stores as
+`5m`. `name` is UNIQUE case-insensitively.
+
+`PUT /api/v1/fixed-parameters/{id}` is partial, and re-validates the type, the
+default and the bounds **together against the resulting row** — retyping a knob
+while its stored default no longer fits is 400 rather than half-applied. Send
+`""` to clear the description, default or group, and `{}` to clear the bounds.
+`DELETE` is always allowed: nothing points at a descriptor, and the column it
+describes is untouched. `{"active": false}` is the reversible path.
+
+> A new knob is still a migration and a column. A row here describes it; it does
+> not create it.
+
 ---
 
 ## 7. Strategy templates
@@ -811,6 +878,46 @@ GET {{BASE}}/api/v1/my-strategies?active=true
 GET {{BASE}}/api/v1/my-strategies?strategyId={{templateId}}
 GET {{BASE}}/api/v1/my-strategies/{{id}}
 ```
+
+**Grouped by template** — the same rows, arranged one group per `strategyId` and
+tagged with that template's `strategyName`. A user usually builds several
+customizations of one template (one per market, one per tuning), so this is the
+shape a list screen wants: a heading per template with its rows under it.
+
+```http
+GET {{BASE}}/api/v1/my-strategies/grouped
+GET {{BASE}}/api/v1/my-strategies/grouped?active=true
+GET {{BASE}}/api/v1/my-strategies/grouped?strategyId={{templateId}}   # just that group
+```
+
+**200**
+
+```json
+[ { "strategyId": "3f1b0c7e-9a41-4c2e-9f11-2b7d5a6e8c01",
+    "strategyName": "EMA Averaging",
+    "strategyDescription": "EMA of the highs against a shorter signal leg, traded through options or the future, with a configurable averaging ladder.",
+    "count": 2,
+    "strategies": [
+      { "id": "us000000-1111-4222-8333-444444444444",
+        "name": "NIFTY 21/9 both sides", "symbol": "NIFTY", "candleDuration": "5m", "…": "…" },
+      { "id": "us000000-1111-4222-8333-444444444445",
+        "name": "BANKNIFTY 21/9", "symbol": "BANKNIFTY", "candleDuration": "5m", "…": "…" } ] },
+  { "strategyId": "8c2d1e0f-7b36-4a15-9e42-0d3c6b5a4f92",
+    "strategyName": "EMA Crossover",
+    "strategyDescription": "Long when the fast leg crosses above the slow leg…",
+    "count": 1,
+    "strategies": [
+      { "id": "us000000-1111-4222-8333-444444444446",
+        "name": "NIFTY fast cross", "…": "…" } ] } ]
+```
+
+Each entry in `strategies[]` is the **same complete `UserStrategyResponse`** the
+flat list returns — grouping changes how the rows are arranged, never what a row
+carries. Groups are ordered by `strategyName` (case-insensitively), rows inside a
+group oldest first, `count` describes the rows actually in the group *after* the
+`active` filter, and a template the caller has built nothing from produces no
+group at all. The name is a **field, not a JSON key**, so rewording a template
+changes a value and never the structure you parse.
 
 ### 8.5 The bot shape
 

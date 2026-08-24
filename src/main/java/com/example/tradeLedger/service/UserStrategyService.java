@@ -2,6 +2,7 @@ package com.example.tradeLedger.service;
 
 import com.example.tradeLedger.dto.StrategyDeployRequest;
 import com.example.tradeLedger.dto.StrategyDeploymentResponse;
+import com.example.tradeLedger.dto.UserStrategyGroupResponse;
 import com.example.tradeLedger.dto.UserStrategyRequest;
 import com.example.tradeLedger.dto.UserStrategyResponse;
 import com.example.tradeLedger.dto.UserStrategyRuntimeResponse;
@@ -37,6 +38,22 @@ public interface UserStrategyService {
      * @param strategyId only strategies built from this template, or null for all
      */
     List<UserStrategyResponse> list(String email, Boolean active, UUID strategyId);
+
+    /**
+     * The same rows {@link #list} returns, arranged one group per template.
+     *
+     * A user builds several customizations of the same template - one per market,
+     * one per tuning - so a list screen wants a heading per template rather than a
+     * flat run of rows. The grouping key is {@code user_strategies.strategy_id} and
+     * the group carries the template name as its tag.
+     *
+     * Groups come back ordered by that name, rows inside a group oldest first, and
+     * a template the caller has built nothing from produces no group at all.
+     *
+     * @param active     true/false to filter by the archive flag, null for all
+     * @param strategyId only the group for this template, or null for every group
+     */
+    List<UserStrategyGroupResponse> listGrouped(String email, Boolean active, UUID strategyId);
 
     UserStrategyResponse get(String email, UUID id);
 

@@ -2,6 +2,7 @@ package com.example.tradeLedger.controller;
 
 import com.example.tradeLedger.dto.StrategyDeployRequest;
 import com.example.tradeLedger.dto.StrategyDeploymentResponse;
+import com.example.tradeLedger.dto.UserStrategyGroupResponse;
 import com.example.tradeLedger.dto.UserStrategyRequest;
 import com.example.tradeLedger.dto.UserStrategyResponse;
 import com.example.tradeLedger.dto.UserStrategyRuntimeResponse;
@@ -61,6 +62,23 @@ public class UserStrategyController extends SecuredController {
         String email = currentEmail();
         log.info("GET strategies active={} template={} | user={}", active, strategyId, email);
         return userStrategyService.list(email, active, strategyId);
+    }
+
+    @GetMapping("/grouped")
+    @Operation(summary = "List the caller's strategies grouped by template",
+            description = "The same rows as the flat list, arranged one group per "
+                    + "`strategyId` and tagged with that template's `strategyName`. Groups are "
+                    + "ordered by name, rows inside a group oldest first, and a template the "
+                    + "caller has built nothing from produces no group. The same `active` and "
+                    + "`strategyId` filters apply - `strategyId` narrows it to that one group.")
+    public List<UserStrategyGroupResponse> listGrouped(
+            @Parameter(description = "true for live, false for archived, omit for all")
+            @RequestParam(required = false) Boolean active,
+            @Parameter(description = "Only the group for this template")
+            @RequestParam(required = false) UUID strategyId) {
+        String email = currentEmail();
+        log.info("GET strategies grouped active={} template={} | user={}", active, strategyId, email);
+        return userStrategyService.listGrouped(email, active, strategyId);
     }
 
     @GetMapping("/{id}")

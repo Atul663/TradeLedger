@@ -381,6 +381,53 @@ CREATE TABLE IF NOT EXISTS indicators (
   created_at   timestamptz NOT NULL DEFAULT now()
 );
 
+-- The FIXED knobs: what each one is called, what type it takes, what a form
+-- pre-fills and what bounds it should enforce.
+--
+-- A DESCRIPTOR CATALOG, NOT A VALUE STORE - and the distinction is the whole
+-- reason it is allowed to exist. The value of every knob described here is a
+-- typed column on user_strategies or user_strategy_subscriptions, with its own
+-- default and its own CHECK constraint; nothing joins to this table, no user row
+-- hangs off it, and emptying it changes nothing except how a form renders.
+--
+-- It is NOT the old `parameters` catalog, which held user VALUES as text rows
+-- reached through link tables. That one was dropped and SchemaMappingTest
+-- asserts it stays dropped.
+--
+-- The dynamic counterpart is indicators.param_schema, which does the same job
+-- for the one pluggable thing on the platform. Bootstrapped by
+-- ControlPlaneSeeder with a row per fixed column; retuned through
+-- /api/v1/fixed-parameters.
+CREATE TABLE IF NOT EXISTS fixed_parameters (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name          varchar(100) NOT NULL UNIQUE,    -- 'slPct' - the API field name
+  label         varchar(100) NOT NULL,           -- 'Stop loss %'
+  description   text,
+  data_type     varchar(20) NOT NULL
+                CHECK (data_type IN ('int','decimal','bool','enum','timeframe','text')),
+  scope         varchar(20) NOT NULL DEFAULT 'execution'
+                CHECK (scope IN ('signal','execution')),
+  default_value text,                            -- text for six types; data_type coerces it
+  validation    jsonb,                           -- {"min":0,"max":100} / {"options":[...]}
+  param_group   varchar(50),                     -- 'market','instrument','sizing','exits'
+  display_order int NOT NULL DEFAULT 0,
+  is_required   boolean NOT NULL DEFAULT false,
+  is_active     boolean NOT NULL DEFAULT true,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  updated_at    timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT ck_fixed_parameters_display_order CHECK (display_order >= 0)
+);
+-- Case-insensitive uniqueness: 'slPct' and 'slpct' are one knob, and the API
+-- resolves a descriptor by name without caring which spelling a caller sent.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_fixed_parameters_name_lower
+  ON fixed_parameters (lower(name));
+-- The read a form makes: one section, in order.
+CREATE INDEX IF NOT EXISTS idx_fixed_parameters_group
+  ON fixed_parameters (param_group, display_order, name);
+DROP TRIGGER IF EXISTS trg_fixed_parameters_touch ON fixed_parameters;
+CREATE TRIGGER trg_fixed_parameters_touch BEFORE UPDATE ON fixed_parameters
+  FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
 -- Long-narrow: ONE ROW PER KNOB. RSI params, EMA params, SuperTrend params
 -- all live here identically - new strategies are INSERTs, never ALTER TABLE.
 -- scope drives the gap-#4 split: 'signal' -> instance (hashed),
