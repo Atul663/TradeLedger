@@ -68,7 +68,7 @@ public class OpenApiConfig {
                                 .description("""
                                         Access token from GET /api/v1/auth/me (field: accessToken).
                                         Paste the raw token only - Swagger adds the "Bearer " prefix.
-                                        Expires after 30 minutes; refresh via POST /api/v1/auth/refresh.""")))
+                                        Expires after 1 day; refresh via POST /api/v1/auth/refresh.""")))
                 .addSecurityItem(new SecurityRequirement().addList(BEARER_SCHEME));
     }
 

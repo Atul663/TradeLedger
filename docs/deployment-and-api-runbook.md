@@ -349,7 +349,7 @@ Cookie: refresh_token=<the cookie>
   "hasPanCard": false }
 ```
 
-`accessToken` lives 30 minutes. Refresh with `POST /api/v1/auth/refresh`
+`accessToken` lives 1 day. Refresh with `POST /api/v1/auth/refresh`
 (same cookie) → `{"accessToken":"…"}`. Every call below sends
 `Authorization: Bearer {{TOKEN}}`.
 
