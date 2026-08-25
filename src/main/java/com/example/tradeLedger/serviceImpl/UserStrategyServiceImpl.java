@@ -138,6 +138,7 @@ public class UserStrategyServiceImpl implements UserStrategyService {
                     template.getId(),
                     template.getName(),
                     template.getDescription(),
+                    template.isSystem(),
                     rows.size(),
                     rows.stream().map(this::toResponse).toList()));
         }
@@ -778,6 +779,7 @@ public class UserStrategyServiceImpl implements UserStrategyService {
                 template.getId(),
                 template.getName(),
                 template.getDescription(),
+                template.isSystem(),
                 strategy.getName(),
                 strategy.getDescription(),
                 symbol != null ? symbol.getId() : null,

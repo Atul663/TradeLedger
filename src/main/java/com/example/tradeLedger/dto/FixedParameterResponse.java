@@ -21,7 +21,7 @@ import java.util.UUID;
 public record FixedParameterResponse(
         UUID id,
         @Schema(example = "slPct") String name,
-        @Schema(example = "Stop loss %") String label,
+        @Schema(example = "SL %") String label,
         String description,
         @Schema(example = "decimal",
                 allowableValues = {"int", "decimal", "bool", "enum", "timeframe", "text"})
@@ -33,7 +33,7 @@ public record FixedParameterResponse(
         @Schema(description = "Empty when the knob is unbounded.",
                 example = "{\"min\": 0, \"max\": 100}")
         Map<String, Object> validation,
-        @Schema(example = "exits") String paramGroup,
+        @Schema(example = "Exits") String paramGroup,
         @Schema(example = "1") int displayOrder,
         boolean required,
         boolean active,

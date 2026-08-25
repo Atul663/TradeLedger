@@ -37,7 +37,7 @@ public record UserStrategyIndicatorGroupResponse(
                 example = "b2e4a1c8-1f3d-4e6a-9b2c-5d7e8f0a1b2c")
         UUID indicatorId,
 
-        @Schema(description = "The group's tag - the indicator's name.", example = "EMA AVERAGING")
+        @Schema(description = "The group's tag - the indicator's name.", example = "EMA Averaging")
         String indicatorName,
 
         @Schema(description = "How many usages are in this group. Greater than one only when "

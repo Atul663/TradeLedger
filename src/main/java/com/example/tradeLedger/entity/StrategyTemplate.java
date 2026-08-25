@@ -15,7 +15,7 @@ import java.util.UUID;
  * holds conditions over indicator references with {@code $key} bindings:
  *
  * <pre>
- * {"entry":{"ind":"EMA CROSSOVER","params":{"k":"$k","d":"$d"}}}
+ * {"entry":{"ind":"EMA Crossover","params":{"k":"$k","d":"$d"}}}
  * </pre>
  *
  * That is the whole of the template-to-indicator relationship: {@code "ind"}

@@ -133,7 +133,7 @@ public class UserStrategyController extends SecuredController {
                                               "slPct": 1.5,
                                               "tpPct": 3.0,
                                               "indicators": [
-                                                { "indicatorName": "EMA AVERAGING", "params": { "k": 21, "d": 9 } }
+                                                { "indicatorName": "EMA Averaging", "params": { "k": 21, "d": 9 } }
                                               ]
                                             }"""),
                             @ExampleObject(name = "Calls only, deep OTM",
@@ -151,7 +151,7 @@ public class UserStrategyController extends SecuredController {
                                               "baseLot": 75,
                                               "slPct": 2.0,
                                               "indicators": [
-                                                { "indicatorName": "EMA AVERAGING", "params": { "k": 50, "d": 21 } }
+                                                { "indicatorName": "EMA Averaging", "params": { "k": 50, "d": 21 } }
                                               ]
                                             }"""),
                             @ExampleObject(name = "Futures",
@@ -167,7 +167,7 @@ public class UserStrategyController extends SecuredController {
                                               "lotRule": "FIXED",
                                               "baseLot": 75,
                                               "indicators": [
-                                                { "indicatorName": "EMA AVERAGING", "params": { "k": 50, "d": 21 } }
+                                                { "indicatorName": "EMA Averaging", "params": { "k": 50, "d": 21 } }
                                               ]
                                             }"""),
                             @ExampleObject(name = "Minimal - template only",
@@ -199,7 +199,7 @@ public class UserStrategyController extends SecuredController {
                                             + "different shared computation.",
                                     value = """
                                             { "indicators": [
-                                                { "indicatorName": "EMA AVERAGING", "params": { "k": 50 } } ] }"""),
+                                                { "indicatorName": "EMA Averaging", "params": { "k": 50 } } ] }"""),
                             @ExampleObject(name = "Move the call strike",
                                     value = """
                                             { "ceMoneyness": "OTM", "ceStrikeOffset": 3 }"""),

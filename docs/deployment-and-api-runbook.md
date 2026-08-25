@@ -122,8 +122,8 @@ docker compose logs -f app
 Look for the seeder lines. On a database where you just dropped the tables:
 
 ```
-Seeded indicator EMA CROSSOVER id=…
-Seeded indicator EMA AVERAGING id=…
+Seeded indicator EMA Crossover id=…
+Seeded indicator EMA Averaging id=…
 Seeded indicator EMA id=…
 Seeded indicator RSI id=…
 Seeded template EMA Crossover id=…
@@ -524,7 +524,7 @@ GET {{BASE}}/api/v1/indicators?active=true
 
 ```json
 [ { "id": "i1000000-0000-0000-0000-000000000001",
-    "name": "EMA AVERAGING",
+    "name": "EMA Averaging",
     "paramSchema": {
       "k": { "type": "int", "min": 1, "max": 300, "default": 21 },
       "d": { "type": "int", "min": 1, "max": 300, "default": 9, "lt": "k" } },
@@ -532,7 +532,7 @@ GET {{BASE}}/api/v1/indicators?active=true
     "usedByStrategies": [ "EMA Averaging" ],
     "createdAt": "2026-08-23T19:38:11.004+05:30" },
   { "id": "i1000000-0000-0000-0000-000000000002",
-    "name": "EMA CROSSOVER",
+    "name": "EMA Crossover",
     "paramSchema": {
       "k": { "type": "int", "min": 1, "max": 300, "default": 9 },
       "d": { "type": "int", "min": 1, "max": 300, "default": 21, "gt": "k" } },
@@ -592,7 +592,7 @@ with — the values are written through `/api/v1/my-strategies` and
 how a form renders.
 
 ```http
-GET {{BASE}}/api/v1/fixed-parameters?group=exits&active=true
+GET {{BASE}}/api/v1/fixed-parameters?group=Exits&active=true
 ```
 
 **200** — ordered by group, then position within it, then name.
@@ -600,13 +600,13 @@ GET {{BASE}}/api/v1/fixed-parameters?group=exits&active=true
 ```json
 [ { "id": "f1000000-0000-0000-0000-000000000001",
     "name": "slPct",
-    "label": "Stop loss %",
+    "label": "SL %",
     "description": "Percent move against the position that closes it.",
     "dataType": "decimal",
     "scope": "execution",
     "defaultValue": "2.5",
     "validation": { "min": 0, "max": 100 },
-    "paramGroup": "exits",
+    "paramGroup": "Exits",
     "displayOrder": 1,
     "required": false,
     "active": true,
@@ -614,9 +614,26 @@ GET {{BASE}}/api/v1/fixed-parameters?group=exits&active=true
     "updatedAt": "2026-08-24T11:02:44.118+05:30" } ]
 ```
 
-Seeded groups: `market`, `instrument`, `sizing`, `exits`, `deployment` — one
+Seeded groups: `Market`, `Instrument`, `Sizing`, `Exits`, `Deployment` — one
 descriptor per fixed column. Unlike indicator schemas, seeding is **insert-only**:
 a row you edit here survives the next deploy.
+
+**The `symbol` knob** (`Market`, position 0) is the one whose options are rows.
+Nothing is stored for it; the list is filled from the active `symbols` on every
+read:
+
+```json
+{ "name": "symbol", "label": "Underlying",
+  "dataType": "symbol", "scope": "signal", "required": true,
+  "defaultValue": null,
+  "validation": { "options": ["BANKNIFTY", "NIFTY"],
+                  "optionsSource": "/api/v1/symbols" },
+  "paramGroup": "Market", "displayOrder": 0 }
+```
+
+Seed `symbols` first (§2) or the list comes back empty. A ticker is unique per
+exchange, so one listed on two venues appears once — send `exchangeCode`
+alongside it, or `symbolId` instead. Setting `validation.options` on it is a 400.
 
 ```http
 GET {{BASE}}/api/v1/fixed-parameters/grouped?active=true
@@ -626,10 +643,10 @@ GET {{BASE}}/api/v1/fixed-parameters/grouped?active=true
 same order; `group=` narrows it to that one group.
 
 ```json
-[ { "paramGroup": "exits", "count": 2,
-    "parameters": [ { "name": "slPct", "label": "Stop loss %", … },
-                    { "name": "tpPct", "label": "Take profit %", … } ] },
-  { "paramGroup": "instrument", "count": 7, "parameters": [ … ] } ]
+[ { "paramGroup": "Exits", "count": 2,
+    "parameters": [ { "name": "slPct", "label": "SL %", … },
+                    { "name": "tpPct", "label": "TP %", … } ] },
+  { "paramGroup": "Instrument", "count": 7, "parameters": [ … ] } ]
 ```
 
 A descriptor with no group collects in a single entry whose `paramGroup` is
@@ -637,7 +654,7 @@ A descriptor with no group collects in a single entry whose `paramGroup` is
 
 The same fold, with each field's **value** filled in, comes back on
 `GET /api/v1/my-strategies/{id}` as `fixedParameters[]` — the strategy-scope
-knobs only, since the `deployment` group describes subscription columns. It is an
+knobs only, since the `Deployment` group describes subscription columns. It is an
 arrangement of the flat fields, not a second source of truth: writes still go
 through `PUT /api/v1/my-strategies/{id}` with the flat name.
 
@@ -647,14 +664,16 @@ POST {{BASE}}/api/v1/fixed-parameters
 { "name": "trailStopPct", "label": "Trailing stop %", "dataType": "decimal",
   "scope": "execution", "defaultValue": "1.5",
   "validation": { "min": 0, "max": 100 },
-  "paramGroup": "exits", "displayOrder": 3 }
+  "paramGroup": "Exits", "displayOrder": 3 }
 ```
 
 `defaultValue` is text whatever the type is, and is **parsed against `dataType`
 and `validation` on save** — an `int` default that is not an integer, a `decimal`
 outside its own `min`/`max`, or an `enum` default that is not one of its
 `options` are all 400. `options` is required for an `enum` and rejected for
-anything else; `min`/`max` apply only to `int` and `decimal`. A `timeframe`
+anything else — and are **refused** on a `symbol` knob, whose choices are the
+active `symbols` and are filled in from the table on read, never stored;
+`min`/`max` apply only to `int` and `decimal`. A `timeframe`
 default goes through the same normalizer a strategy's does, so `5M` stores as
 `5m`. `name` is UNIQUE case-insensitively.
 
@@ -689,11 +708,11 @@ GET {{BASE}}/api/v1/strategy-templates?active=true
     "description": "EMA of the highs against a shorter signal leg, traded through options or the future, with a configurable averaging ladder.",
     "system": true,
     "active": true,
-    "ruleTree": { "entry": { "ind": "EMA AVERAGING",
+    "ruleTree": { "entry": { "ind": "EMA Averaging",
                              "params": { "k": "$k", "d": "$d" } } },
     "indicators": [
       { "id": "i1000000-0000-0000-0000-000000000001",
-        "name": "EMA AVERAGING",
+        "name": "EMA Averaging",
         "active": true,
         "paramSchema": {
           "k": { "type": "int", "min": 1, "max": 300, "default": 21 },
@@ -731,7 +750,7 @@ of `"$key"` binds to the key of that name in the indicator's own `paramSchema`.
 Nodes nest freely under any object or array, so a two-indicator tree is fine:
 
 ```json
-{ "entry": { "and": [ { "ind": "EMA AVERAGING", "params": {"k":"$k","d":"$d"} },
+{ "entry": { "and": [ { "ind": "EMA Averaging", "params": {"k":"$k","d":"$d"} },
                       { "ind": "RSI",           "params": {"period":"$period"} } ] } }
 ```
 
@@ -778,7 +797,7 @@ Authorization: Bearer {{TOKEN}}
   "tpPct": 3.0,
 
   "indicators": [
-    { "indicatorName": "EMA AVERAGING", "params": { "k": 21, "d": 9 } } ] }
+    { "indicatorName": "EMA Averaging", "params": { "k": 21, "d": 9 } } ] }
 ```
 
 #### Every field
@@ -820,6 +839,7 @@ Enums parse case-insensitively (`"otm"` works), but send the canonical form.
   "strategyId": "t1000000-0000-0000-0000-000000000001",
   "strategyName": "EMA Averaging",
   "strategyDescription": "EMA of the highs against a shorter signal leg…",
+  "strategySystem": true,
 
   "name": "NIFTY 21/9 both sides",
   "description": "Sheet block 1",
@@ -847,7 +867,7 @@ Enums parse case-insensitively (`"otm"` works), but send the canonical form.
   "indicators": [
     { "id": "ui000000-0000-0000-0000-000000000001",
       "indicatorId": "i1000000-0000-0000-0000-000000000001",
-      "indicatorName": "EMA AVERAGING",
+      "indicatorName": "EMA Averaging",
       "slot": null,
       "enabled": true,
       "displayOrder": 0,
@@ -886,7 +906,7 @@ POST {{BASE}}/api/v1/my-strategies
   "candleDuration": "5m",
   "derivative": "FUT",
   "lotRule": "FIXED", "baseLot": 75,
-  "indicators": [ { "indicatorName": "EMA AVERAGING",
+  "indicators": [ { "indicatorName": "EMA Averaging",
                     "params": { "k": 50, "d": 21 } } ] }
 ```
 
@@ -919,6 +939,7 @@ GET {{BASE}}/api/v1/my-strategies/grouped?strategyId={{templateId}}   # just tha
 [ { "strategyId": "3f1b0c7e-9a41-4c2e-9f11-2b7d5a6e8c01",
     "strategyName": "EMA Averaging",
     "strategyDescription": "EMA of the highs against a shorter signal leg, traded through options or the future, with a configurable averaging ladder.",
+    "strategySystem": true,
     "count": 2,
     "strategies": [
       { "id": "us000000-1111-4222-8333-444444444444",
@@ -928,6 +949,7 @@ GET {{BASE}}/api/v1/my-strategies/grouped?strategyId={{templateId}}   # just tha
   { "strategyId": "8c2d1e0f-7b36-4a15-9e42-0d3c6b5a4f92",
     "strategyName": "EMA Crossover",
     "strategyDescription": "Long when the fast leg crosses above the slow leg…",
+    "strategySystem": false,
     "count": 1,
     "strategies": [
       { "id": "us000000-1111-4222-8333-444444444446",
@@ -955,12 +977,12 @@ GET {{BASE}}/api/v1/my-strategies/{{id}}/runtime
   "userId": "u0000000-…",
   "strategyId": "t1000000-…",
   "strategyName": "EMA Averaging",
-  "ruleTree": "{\"entry\":{\"ind\":\"EMA AVERAGING\",\"params\":{\"k\":\"$k\",\"d\":\"$d\"}}}",
+  "ruleTree": "{\"entry\":{\"ind\":\"EMA Averaging\",\"params\":{\"k\":\"$k\",\"d\":\"$d\"}}}",
   "symbolId": "1a2b3c4d-…", "symbol": "NIFTY",
   "candleDuration": "5m", "triggerDuration": "5m",
   "active": true,
   "indicators": [
-    { "indicatorId": "i1000000-…", "name": "EMA AVERAGING",
+    { "indicatorId": "i1000000-…", "name": "EMA Averaging",
       "slot": null, "params": { "d": 9, "k": 21 } } ],
   "derivative": "OPTION",
   "legs": [ { "side":"CE","moneyness":"OTM","strikeOffset":1,"label":"CE OTM1" },
@@ -981,7 +1003,7 @@ Partial — present is applied, absent is left alone.
 
 ```http
 PUT {{BASE}}/api/v1/my-strategies/{{id}}
-{ "indicators": [ { "indicatorName": "EMA AVERAGING", "params": { "k": 50 } } ] }
+{ "indicators": [ { "indicatorName": "EMA Averaging", "params": { "k": 50 } } ] }
 ```
 
 `d` keeps its value. **200** with the full editor shape — and `configHash` /
@@ -1139,7 +1161,7 @@ POST {{BASE}}/api/v1/my-subscriptions
   "sharedConfigId": "sc000000-…",
   "configHash": "6b1f0c9e2a…",
   "signalParams": { "d": 9, "k": 21 },
-  "indicators": [ "EMA AVERAGING(d=9,k=21)" ],
+  "indicators": [ "EMA Averaging(d=9,k=21)" ],
 
   "tradingAccountId": "ta000000-…001",
   "tradingAccountName": "main",
@@ -1211,7 +1233,7 @@ GET {{BASE}}/api/v1/shared-strategy-configs?status=active
     "configHash": "6b1f0c9e2a…",
     "supersedesId": null,
     "status": "active",
-    "indicators": [ "EMA AVERAGING(d=9,k=21)" ],
+    "indicators": [ "EMA Averaging(d=9,k=21)" ],
     "activeSubscribers": 3,
     "createdAt": "…" } ]
 ```
@@ -1224,7 +1246,7 @@ GET {{BASE}}/api/v1/shared-strategy-configs/indicator-plan
 { "activeStrategySubscriptions": 5,
   "distinctInstances": 2,
   "distinctIndicators": 2,
-  "indicators": [ "EMA AVERAGING(d=21,k=50)", "EMA AVERAGING(d=9,k=21)" ] }
+  "indicators": [ "EMA Averaging(d=21,k=50)", "EMA Averaging(d=9,k=21)" ] }
 ```
 
 **Two strategies with the same `k`/`d` on the same symbol and candle must show one
@@ -1258,9 +1280,9 @@ Every error body has `error` (a displayable sentence). `400` **also** has
 | `averagingCount` out of range | `averagingCount must be 0..10, got 25` |
 | ladder with no adds | `lotRule DOUBLE has no effect while averagingCount is 0 - raise averagingCount, or set lotRule to FIXED` |
 | bad percentage | `slPct must be greater than 0, got 0` |
-| indicator value out of range | `Indicator 'EMA AVERAGING' parameter 'k' must be <= 300, got 400` |
-| indicator cross-field | `Indicator 'EMA AVERAGING' parameter 'd' must be less than 'k' (21 vs 9)` |
-| unknown indicator key | `Indicator 'EMA AVERAGING' has no parameter 'period' - it declares [k, d]` |
+| indicator value out of range | `Indicator 'EMA Averaging' parameter 'k' must be <= 300, got 400` |
+| indicator cross-field | `Indicator 'EMA Averaging' parameter 'd' must be less than 'k' (21 vs 9)` |
+| unknown indicator key | `Indicator 'EMA Averaging' has no parameter 'period' - it declares [k, d]` |
 | bad duration | `timeframe must look like 30s / 5m / 15m / 1h / 1d / 1w, got '5 MIN'` |
 | bad rule tree | `ruleTree references unknown indicator 'EMAA'` |
 | dangling binding | `ruleTree binds $foo but no indicator it references declares 'foo' - the declared keys are [k, d]` |
@@ -1312,7 +1334,7 @@ US=$(curl -s "${H[@]}" -X POST "$BASE/api/v1/my-strategies" -d '{
   "peEnabled":true,"peMoneyness":"OTM","peStrikeOffset":1,
   "lotRule":"DOUBLE","baseLot":65,"averagingCount":2,
   "slPct":1.5,"tpPct":3.0,
-  "indicators":[{"indicatorName":"EMA AVERAGING","params":{"k":21,"d":9}}]}' | jq -r '.id')
+  "indicators":[{"indicatorName":"EMA Averaging","params":{"k":21,"d":9}}]}' | jq -r '.id')
 
 # 5. deploy to every account under the setup
 curl -s "${H[@]}" -X POST "$BASE/api/v1/my-strategies/$US/deploy" \
@@ -1320,7 +1342,7 @@ curl -s "${H[@]}" -X POST "$BASE/api/v1/my-strategies/$US/deploy" \
 
 # 6. retune — every broker follows
 curl -s "${H[@]}" -X PUT "$BASE/api/v1/my-strategies/$US" \
-  -d '{"indicators":[{"indicatorName":"EMA AVERAGING","params":{"k":50,"d":21}}]}' \
+  -d '{"indicators":[{"indicatorName":"EMA Averaging","params":{"k":50,"d":21}}]}' \
   | jq '.configHash,.deploymentCount'
 
 # 7. the dedup gate

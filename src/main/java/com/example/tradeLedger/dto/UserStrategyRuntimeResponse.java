@@ -37,7 +37,7 @@ public record UserStrategyRuntimeResponse(
 
         @Schema(description = "The template's rule tree, as a JSON string, so the bot knows how "
                 + "the values wire together.",
-                example = "{\"entry\":{\"ind\":\"EMA AVERAGING\",\"params\":{\"k\":\"$k\",\"d\":\"$d\"}}}")
+                example = "{\"entry\":{\"ind\":\"EMA Averaging\",\"params\":{\"k\":\"$k\",\"d\":\"$d\"}}}")
         String ruleTree,
 
         @Schema(example = "1a2b3c4d-5e6f-4a8b-9c0d-1e2f3a4b5c6d")
@@ -98,7 +98,7 @@ public record UserStrategyRuntimeResponse(
             @Schema(example = "b2e4a1c8-1f3d-4e6a-9b2c-5d7e8f0a1b2c")
             UUID indicatorId,
 
-            @Schema(example = "EMA AVERAGING")
+            @Schema(example = "EMA Averaging")
             String name,
 
             @Schema(description = "Only set when a template uses one indicator twice.", example = "null")

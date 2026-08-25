@@ -7,7 +7,6 @@ import com.example.tradeLedger.dto.StrategyFixedParameterResponse;
 import com.example.tradeLedger.entity.FixedParameter;
 import com.example.tradeLedger.entity.UserStrategy;
 import com.example.tradeLedger.repository.FixedParameterRepository;
-import com.example.tradeLedger.utils.JsonSupport;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -33,7 +32,7 @@ import java.util.Set;
  * arrangement and nothing else - which is the property the catalog was built to
  * have.
  *
- * The 'deployment' group is deliberately absent: those descriptors name columns
+ * The 'Deployment' group is deliberately absent: those descriptors name columns
  * on {@code user_strategy_subscriptions}, so they belong to a deployment, not to
  * the strategy it deploys.
  */
@@ -52,11 +51,12 @@ public class StrategyFixedParameters {
     private static final Map<String, ValueReader> VALUE_READERS = valueReaders();
 
     private final FixedParameterRepository repository;
-    private final JsonSupport json;
+    private final FixedParameterOptions options;
 
-    public StrategyFixedParameters(FixedParameterRepository repository, JsonSupport json) {
+    public StrategyFixedParameters(FixedParameterRepository repository,
+                                   FixedParameterOptions options) {
         this.repository = repository;
-        this.json = json;
+        this.options = options;
     }
 
     /** The names this class knows how to read off a strategy. */
@@ -85,7 +85,7 @@ public class StrategyFixedParameters {
                             row.getScope(),
                             VALUE_READERS.get(row.getName()).read(strategy),
                             row.getDefaultValue(),
-                            json.toMap(row.getValidation()),
+                            options.validation(row),
                             row.getDisplayOrder(),
                             row.isRequired()))
                     .toList();
@@ -142,7 +142,7 @@ public class StrategyFixedParameters {
                 row.getDataType(),
                 row.getScope(),
                 row.getDefaultValue(),
-                json.toMap(row.getValidation()),
+                options.validation(row),
                 row.getParamGroup(),
                 row.getDisplayOrder(),
                 row.isRequired(),
@@ -158,6 +158,10 @@ public class StrategyFixedParameters {
      */
     private static Map<String, ValueReader> valueReaders() {
         Map<String, ValueReader> readers = new LinkedHashMap<>();
+        // The ticker, not the id: it is what the knob's options offer and what a
+        // PUT carries. Null until a market is chosen, which is the state
+        // 'deployable: false' describes.
+        readers.put("symbol", s -> s.getSymbol() != null ? s.getSymbol().getSymbol() : null);
         readers.put("candleDuration", UserStrategy::getCandleDuration);
         readers.put("triggerDuration", UserStrategy::getTriggerDuration);
         readers.put("derivative", s -> s.getDerivative() != null ? s.getDerivative().name() : null);

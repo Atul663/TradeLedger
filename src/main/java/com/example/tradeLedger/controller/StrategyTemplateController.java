@@ -89,7 +89,7 @@ public class StrategyTemplateController extends SecuredController {
                                               "ruleTree": {
                                                 "entry": {
                                                   "and": [
-                                                    { "ind": "EMA AVERAGING", "params": { "k": "$k", "d": "$d" } },
+                                                    { "ind": "EMA Averaging", "params": { "k": "$k", "d": "$d" } },
                                                     { "ind": "RSI", "params": { "period": "$period" } }
                                                   ]
                                                 }

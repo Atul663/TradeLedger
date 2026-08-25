@@ -46,7 +46,7 @@ public record StrategyTemplateDetailResponse(
         @Schema(example = "true")
         boolean active,
 
-        @Schema(example = "{\"entry\": {\"ind\": \"EMA AVERAGING\", "
+        @Schema(example = "{\"entry\": {\"ind\": \"EMA Averaging\", "
                 + "\"params\": {\"k\": \"$k\", \"d\": \"$d\"}}}")
         Map<String, Object> ruleTree,
 

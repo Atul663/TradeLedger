@@ -202,7 +202,7 @@ a type at all — every other value is a typed column, and its type is the colum
 | Column | Stores |
 |---|---|
 | `id` | UUID PK |
-| `name` | `EMA AVERAGING`, `RSI`. UNIQUE, **uppercased on save**. Matched by exact string against rule trees |
+| `name` | `EMA Averaging`, `RSI`. UNIQUE, **uppercased on save**. Matched by exact string against rule trees |
 | `param_schema` | jsonb. **The declaration**: `{"k":{"type":"int","min":1,"max":300,"default":21}}` |
 | `is_active` | Inactive indicators fail rule-tree validation |
 
@@ -224,12 +224,12 @@ column** on `user_strategies` or `user_strategy_subscriptions`.
 |---|---|
 | `id` | UUID PK |
 | `name` | `slPct`, `baseLot`, `candleDuration`. UNIQUE case-insensitively. By convention **the API field name of the column it describes**, so a form binds the two by string equality |
-| `label` | `Stop loss %` |
+| `label` | `SL %` |
 | `description` | Help text |
-| `data_type` | `int · decimal · bool · enum · timeframe · text` |
+| `data_type` | `int · decimal · bool · enum · timeframe · text · symbol` |
 | `scope` | `signal` / `execution` — whether the knob is part of a strategy's shared identity |
 | `default_value` | text, coerced by `data_type`. What a form **pre-fills**, not what the engine applies |
-| `validation` | jsonb. `{"min":0,"max":100}`, or `{"options":[...]}` which an `enum` requires. Mirrors the CHECK constraint on the column |
+| `validation` | jsonb. `{"min":0,"max":100}`, or `{"options":[...]}` which an `enum` requires. Mirrors the CHECK constraint on the column. **Empty for a `symbol` knob** — see below |
 | `param_group`, `display_order` | Which section of the form, and where in it |
 | `is_required`, `is_active` | Whether a form must demand it; whether it is shown at all |
 
@@ -245,6 +245,26 @@ absence is asserted rather than left to review.
 `min`/`max`, and an `enum` default has to be one of its options. A `timeframe`
 default goes through the same `Timeframes` normalizer a strategy's does, so `5M`
 stores as `5m`.
+
+#### `symbol` — the one knob whose choices are rows
+
+`symbol` is a choice like `enum`, but its options are the active `symbols`, not a
+vocabulary anyone authored. That is why it is a **type of its own** rather than an
+`enum` with a list in it: a list copied into `validation` would be stale the next
+time an instrument is listed or retired, and it would be an admin's to edit when
+it is really the reference data's. So nothing is stored — a `symbol` knob
+**refuses** `validation.options` on write (400) — and `FixedParameterOptions`
+fills them in on every read path, from the table:
+
+```json
+"validation": { "options": ["BANKNIFTY", "FINNIFTY", "NIFTY"],
+                "optionsSource": "/api/v1/symbols" }
+```
+
+Tickers rather than ids, because `symbol` is the field a PUT carries. A ticker is
+unique **per exchange**, not globally, so one listed on two venues is offered once
+and `exchangeCode` alongside it picks the venue — the same pair `SymbolResolver`
+has always required. `symbolId` remains the unambiguous alternative.
 
 ### `strategy_templates` — the logic (`StrategyTemplate.java`)
 
@@ -452,7 +472,7 @@ Every other endpoint expects `Authorization: Bearer <accessToken>`.
         │
         ▼
  seedIndicatorRows()
-        │  IndicatorResolver.indicatorNames(rule_tree)  → ["EMA AVERAGING"]
+        │  IndicatorResolver.indicatorNames(rule_tree)  → ["EMA Averaging"]
         │  each name → indicators row (by name, FK stored)
         │  params = IndicatorParams.defaults(indicator)   {"d":9,"k":21}
         ▼
@@ -517,7 +537,7 @@ is a proxy — a self-call would silently bypass the annotation.
 ### 6.4 Retune — `PUT /api/v1/my-strategies/{id}`
 
 Partial: a present field is applied, an absent one left alone. Send
-`{"indicators":[{"indicatorName":"EMA AVERAGING","params":{"k":50}}]}` and `d`
+`{"indicators":[{"indicatorName":"EMA Averaging","params":{"k":50}}]}` and `d`
 keeps its value.
 
 If the change moves the signal params, the strategy repoints at a different
@@ -618,22 +638,22 @@ An `ApplicationRunner`, idempotent on `indicators.name`,
 
 | Indicator | Schema |
 |---|---|
-| `EMA CROSSOVER` | `k` default 9, `d` default 21 with `gt: k` — the classic fast/slow pair |
-| `EMA AVERAGING` | `k` default 21, `d` default 9 with `lt: k` — the EMA of the highs against a shorter signal leg, so 21/9 and 50/21 are both valid and 9/21 is not |
+| `EMA Crossover` | `k` default 9, `d` default 21 with `gt: k` — the classic fast/slow pair |
+| `EMA Averaging` | `k` default 21, `d` default 9 with `lt: k` — the EMA of the highs against a shorter signal leg, so 21/9 and 50/21 are both valid and 9/21 is not |
 | `EMA`, `RSI` | `period`, for templates that use them singly |
 
 | Template | Rule tree |
 |---|---|
-| `EMA Crossover` | `{"entry":{"ind":"EMA CROSSOVER","params":{"k":"$k","d":"$d"}}}` |
-| `EMA Averaging` | `{"entry":{"ind":"EMA AVERAGING","params":{"k":"$k","d":"$d"}}}` |
+| `EMA Crossover` | `{"entry":{"ind":"EMA Crossover","params":{"k":"$k","d":"$d"}}}` |
+| `EMA Averaging` | `{"entry":{"ind":"EMA Averaging","params":{"k":"$k","d":"$d"}}}` |
 
 | Fixed-parameter group | Descriptors |
 |---|---|
-| `market` | `candleDuration` (signal scope), `triggerDuration` |
-| `instrument` | `derivative`, `ceEnabled` / `ceMoneyness` / `ceStrikeOffset`, and the `pe` three |
-| `sizing` | `lotRule`, `baseLot`, `averagingCount` |
-| `exits` | `slPct`, `tpPct` |
-| `deployment` | `executionMode`, `multiplier`, `capitalAllocated`, `tradeMode` |
+| `Market` | `candleDuration` (signal scope), `triggerDuration` |
+| `Instrument` | `derivative`, `ceEnabled` / `ceMoneyness` / `ceStrikeOffset`, and the `pe` three |
+| `Sizing` | `lotRule`, `baseLot`, `averagingCount` |
+| `Exits` | `slPct`, `tpPct` |
+| `Deployment` | `executionMode`, `multiplier`, `capitalAllocated`, `tradeMode` |
 
 Schemas **converge** on every boot — they are the only declaration of what applies
 by default, so a platform retune has to be able to land. Rule trees converge only

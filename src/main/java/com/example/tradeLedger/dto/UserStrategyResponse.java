@@ -44,6 +44,13 @@ public record UserStrategyResponse(
                 + "or the future, with a configurable averaging ladder.")
         String strategyDescription,
 
+        @Schema(description = "Whether the TEMPLATE this runs is a seeded platform one. A system "
+                + "template is shared by every user and locked - it cannot be edited or deleted, "
+                + "so nothing about the logic behind this strategy can change under it. This "
+                + "strategy itself is the caller's either way, and stays fully editable.",
+                example = "true")
+        boolean strategySystem,
+
         @Schema(description = "The caller's own label.", example = "NIFTY 21/9 both sides")
         String name,
 
@@ -129,7 +136,7 @@ public record UserStrategyResponse(
         // ---------------------------------------------------- fixed knobs
 
         @Schema(description = "The fixed knobs above, arranged one group per paramGroup - "
-                + "market, instrument, sizing, exits - each carrying its descriptor from "
+                + "Market, Instrument, Sizing, Exits - each carrying its descriptor from "
                 + "fixed_parameters and its current value. A second ARRANGEMENT of the flat "
                 + "fields, not a second source of truth: PUT still addresses the flat name. "
                 + "Empty if the descriptor catalog has been emptied.")

@@ -45,10 +45,14 @@ public class FixedParameterServiceImpl implements FixedParameterService {
     private static final String KEY_OPTIONS = "options";
 
     private final FixedParameterRepository repository;
+    private final FixedParameterOptions options;
     private final JsonSupport json;
 
-    public FixedParameterServiceImpl(FixedParameterRepository repository, JsonSupport json) {
+    public FixedParameterServiceImpl(FixedParameterRepository repository,
+                                     FixedParameterOptions options,
+                                     JsonSupport json) {
         this.repository = repository;
+        this.options = options;
         this.json = json;
     }
 
@@ -359,6 +363,17 @@ public class FixedParameterServiceImpl implements FixedParameterService {
             errors.add("validation.min/max only apply to an int or decimal, not " + dataType);
         }
 
+        // A symbol knob's choices are rows, not an authored vocabulary. Accepting a
+        // list here would let an admin freeze one, and it would be wrong the next
+        // time an instrument is listed - the read path fills them from the table.
+        if (FixedParameter.TYPE_SYMBOL.equals(dataType)) {
+            if (rules.containsKey(KEY_OPTIONS)) {
+                errors.add("validation.options cannot be set on a symbol knob - its choices are "
+                        + "the active symbols and are filled in from /api/v1/symbols on read");
+            }
+            return rules;
+        }
+
         Object options = rules.get(KEY_OPTIONS);
         if (options != null) {
             if (!isEnum) {
@@ -493,7 +508,9 @@ public class FixedParameterServiceImpl implements FixedParameterService {
                 parameter.getDataType(),
                 parameter.getScope(),
                 parameter.getDefaultValue(),
-                json.toMap(parameter.getValidation()),
+                // Not the stored map: a reference type's options come from the
+                // table that owns them, so every read path serves the same list.
+                options.validation(parameter),
                 parameter.getParamGroup(),
                 parameter.getDisplayOrder(),
                 parameter.isRequired(),

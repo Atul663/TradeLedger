@@ -34,7 +34,7 @@ public record StrategyFixedParameterResponse(
                 + "addresses.", example = "slPct")
         String name,
 
-        @Schema(example = "Stop loss %")
+        @Schema(example = "SL %")
         String label,
 
         String description,

@@ -34,7 +34,7 @@ public class FixedParameterRequest {
     private String name;
 
     @Schema(description = "What a human sees next to the field.",
-            example = "Stop loss %", maxLength = 100)
+            example = "SL %", maxLength = 100)
     private String label;
 
     @Schema(description = "Help text shown under the field.",
@@ -64,7 +64,7 @@ public class FixedParameterRequest {
     private Map<String, Object> validation;
 
     @Schema(description = "The section of the form it belongs to.",
-            example = "exits", maxLength = 50)
+            example = "Exits", maxLength = 50)
     private String paramGroup;
 
     @Schema(description = "Position within its group. Ties break on name.",

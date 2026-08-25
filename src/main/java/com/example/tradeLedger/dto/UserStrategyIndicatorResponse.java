@@ -26,7 +26,7 @@ public record UserStrategyIndicatorResponse(
         @Schema(example = "b2e4a1c8-1f3d-4e6a-9b2c-5d7e8f0a1b2c")
         UUID indicatorId,
 
-        @Schema(example = "EMA AVERAGING")
+        @Schema(example = "EMA Averaging")
         String indicatorName,
 
         @Schema(description = "Only set when a template uses one indicator twice.", example = "null")

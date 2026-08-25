@@ -57,7 +57,7 @@ block, which is generated from each indicator's `paramSchema`.
 
 **Or generate all of it.** The template and strategy responses also carry the
 same content pre-arranged into form sections — `fixedParameters[]` grouped by
-`paramGroup` (market, instrument, sizing, exits), each field with its label,
+`paramGroup` (Market, Instrument, Sizing, Exits), each field with its label,
 type, bounds and — on a saved strategy — its current value; and
 `indicatorGroups[]` grouped by indicator name. That is an **arrangement of the
 same fields**, not a second source of truth: every value in it is also a flat
@@ -121,7 +121,8 @@ type TradeMode     = 'paper' | 'live';
 type ExecutionMode = 'FIXED_QTY' | 'CAPITAL_PERCENT' | 'RISK_PERCENT';
 type InstanceStatus= 'active' | 'retired';
 type InstrumentType= 'spot' | 'future' | 'option' | 'index';
-type ParamType     = 'int' | 'decimal' | 'bool' | 'enum' | 'text';
+type ParamType     = 'int' | 'decimal' | 'bool' | 'enum' | 'text';        // indicator paramSchema
+type FixedType     = ParamType | 'timeframe' | 'symbol';                  // fixedParameters[].dataType
 
 const STRIKE_OFFSETS = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15];   // ITM and OTM
 ```
@@ -197,7 +198,7 @@ If `GET /trading-accounts` returns `[]`, route to broker setup:
 
 ```
 PUT /api/v1/my-strategies/{id}
-{ "indicators": [ {"indicatorName":"EMA AVERAGING", "params": {"k": 50}} ] }
+{ "indicators": [ {"indicatorName":"EMA Averaging", "params": {"k": 50}} ] }
 ```
 
 Only what changed. Warn the user that every deployment follows.
@@ -216,21 +217,21 @@ different shared computation. Nothing broke — do not show a scary message.
   "id": "9f1c…", "name": "EMA Averaging", "version": 1,
   "description": "EMA of the highs against a shorter signal leg…",
   "system": true, "active": true,
-  "ruleTree": { "entry": { "ind": "EMA AVERAGING", "params": {"k":"$k","d":"$d"} } },
+  "ruleTree": { "entry": { "ind": "EMA Averaging", "params": {"k":"$k","d":"$d"} } },
   "indicators": [ {
-      "id": "b2e4…", "name": "EMA AVERAGING", "active": true,
+      "id": "b2e4…", "name": "EMA Averaging", "active": true,
       "paramSchema": {
         "k": {"type":"int","min":1,"max":300,"default":21},
         "d": {"type":"int","min":1,"max":300,"default":9,"lt":"k"}
       } } ],
   "indicatorGroups": [ {
-      "indicatorName": "EMA AVERAGING", "usageCount": 1, "count": 1,
-      "indicators": [ { "id": "b2e4…", "name": "EMA AVERAGING", "active": true,
+      "indicatorName": "EMA Averaging", "usageCount": 1, "count": 1,
+      "indicators": [ { "id": "b2e4…", "name": "EMA Averaging", "active": true,
                         "paramSchema": { "k": {…}, "d": {…} } } ] } ],
   "fixedParameters": [ {
-      "paramGroup": "exits", "count": 2,
+      "paramGroup": "Exits", "count": 2,
       "parameters": [ {
-          "id": "…", "name": "slPct", "label": "Stop loss %",
+          "id": "…", "name": "slPct", "label": "SL %",
           "description": "Percent move against the position that closes it…",
           "dataType": "decimal", "scope": "execution",
           "defaultValue": "2.5", "validation": {"min":0,"max":100},
@@ -288,7 +289,7 @@ means the column default.
   "slPct": 1.5, "tpPct": 3.0,
 
   "indicators": [
-    { "indicatorName": "EMA AVERAGING", "params": { "k": 21, "d": 9 } }
+    { "indicatorName": "EMA Averaging", "params": { "k": 21, "d": 9 } }
   ]
 }
 ```
@@ -320,6 +321,7 @@ twice.
 {
   "id": "…", "userId": "…",
   "strategyId": "…", "strategyName": "EMA Averaging", "strategyDescription": "…",
+  "strategySystem": true,
   "name": "NIFTY 21/9 both sides", "description": null,
 
   "symbolId": "…", "symbol": "NIFTY",
@@ -336,30 +338,30 @@ twice.
   "slPct": 1.50, "tpPct": 3.00,
 
   "indicators": [ {
-      "id": "…", "indicatorId": "…", "indicatorName": "EMA AVERAGING",
+      "id": "…", "indicatorId": "…", "indicatorName": "EMA Averaging",
       "slot": null, "enabled": true, "displayOrder": 0,
       "params": { "d": 9, "k": 21 },
       "paramSchema": { "k": {"type":"int","min":1,"max":300,"default":21},
                        "d": {"type":"int","min":1,"max":300,"default":9,"lt":"k"} } } ],
 
   "indicatorGroups": [ {
-      "indicatorId": "…", "indicatorName": "EMA AVERAGING",
+      "indicatorId": "…", "indicatorName": "EMA Averaging",
       "count": 1, "enabled": true,
       "schema": { "k": {…}, "d": {…} },
       "indicators": [ { …the same row as above… } ] } ],
 
   "fixedParameters": [ {
-      "paramGroup": "exits", "count": 2,
+      "paramGroup": "Exits", "count": 2,
       "parameters": [
-        { "id": "…", "name": "slPct", "label": "Stop loss %",
+        { "id": "…", "name": "slPct", "label": "SL %",
           "dataType": "decimal", "scope": "execution",
           "value": 1.50,
           "defaultValue": "2.5", "validation": {"min":0,"max":100},
           "displayOrder": 1, "required": false },
-        { "name": "tpPct", "label": "Take profit %", "value": 3.00, … } ] },
-    { "paramGroup": "instrument", "count": 7, "parameters": [ … ] },
-    { "paramGroup": "market",     "count": 2, "parameters": [ … ] },
-    { "paramGroup": "sizing",     "count": 3, "parameters": [ … ] } ],
+        { "name": "tpPct", "label": "TP %", "value": 3.00, … } ] },
+    { "paramGroup": "Instrument", "count": 7, "parameters": [ … ] },
+    { "paramGroup": "Market",     "count": 2, "parameters": [ … ] },
+    { "paramGroup": "Sizing",     "count": 3, "parameters": [ … ] } ],
 
   "sharedConfigId": "…", "configHash": "a3f1…",
   "deployable": true, "deploymentCount": 3,
@@ -389,9 +391,28 @@ a form:
   the group because it belongs to the indicator, and is still on every row.
 - `fixedParameters[]` — one group per `paramGroup`, each field carrying its
   descriptor (from `/api/v1/fixed-parameters`) **and** its `value` on this
-  strategy, already typed. The `deployment` group is absent: those knobs are
+  strategy, already typed. The `Deployment` group is absent: those knobs are
   columns on a subscription, not on a strategy, and they come back on
   `/api/v1/my-subscriptions`.
+
+**The `symbol` knob renders itself.** It sits first in the `Market` group with
+`dataType: "symbol"`, and its `validation.options` is the live list of active
+tickers — filled in from the `symbols` table on every read, never stored, so a
+newly listed instrument shows up without a deploy. Render it as a select like any
+`enum`; `optionsSource` (`/api/v1/symbols`) is where to refresh it from.
+
+```json
+{ "name": "symbol", "label": "Underlying", "dataType": "symbol",
+  "scope": "signal", "required": true, "value": "NIFTY",
+  "validation": { "options": ["BANKNIFTY", "NIFTY"],
+                  "optionsSource": "/api/v1/symbols" },
+  "displayOrder": 0 }
+```
+
+Tickers, not ids — because `symbol` is what a PUT carries. **A ticker is unique
+per exchange, not globally**, so one listed on two venues appears in the list
+once; send `exchangeCode` with it, or send `symbolId` instead. `value` is `null`
+until a market is chosen, which is the state `deployable: false` describes.
 
 **Write with the flat names.** These are read shapes. `PUT` takes `slPct`, not a
 group entry — see 5.2. And if the descriptor catalog is empty or a knob has been
@@ -490,9 +511,9 @@ them saves a round trip.
 | `averagingCount` outside 0–10 | `averagingCount must be 0..10…` |
 | Non-FIXED ladder with 0 adds | `lotRule DOUBLE has no effect while averagingCount is 0…` |
 | `slPct` / `tpPct` outside (0, 100] | `slPct must be greater than 0…` |
-| Indicator value out of range | `Indicator 'EMA AVERAGING' parameter 'k' must be <= 300, got 400` |
+| Indicator value out of range | `Indicator 'EMA Averaging' parameter 'k' must be <= 300, got 400` |
 | Indicator cross-field | `…parameter 'd' must be less than 'k' (21 vs 9)` |
-| Unknown indicator key | `Indicator 'EMA AVERAGING' has no parameter 'period' - it declares [k, d]` |
+| Unknown indicator key | `Indicator 'EMA Averaging' has no parameter 'period' - it declares [k, d]` |
 
 ---
 
@@ -511,7 +532,7 @@ POST /api/v1/my-strategies
   "ceEnabled": true, "ceMoneyness": "OTM", "ceStrikeOffset": 1,
   "peEnabled": true, "peMoneyness": "OTM", "peStrikeOffset": 1,
   "lotRule": "DOUBLE", "baseLot": 65, "averagingCount": 2,
-  "indicators": [ { "indicatorName": "EMA AVERAGING", "params": { "k": 21, "d": 9 } } ] }
+  "indicators": [ { "indicatorName": "EMA Averaging", "params": { "k": 21, "d": 9 } } ] }
 → 201, deployable: true
 
 POST /api/v1/my-strategies/{id}/deploy
@@ -526,9 +547,9 @@ different values, so it is a second strategy, not a second template:
 ```http
 POST /api/v1/my-strategies
 { "strategyName": "EMA Averaging", "name": "NIFTY 50/21", … ,
-  "indicators": [ { "indicatorName": "EMA AVERAGING", "params": { "k": 50, "d": 21 } } ] }
+  "indicators": [ { "indicatorName": "EMA Averaging", "params": { "k": 50, "d": 21 } } ] }
 ```
 
-Both are valid because the `EMA AVERAGING` schema declares `d` with `lt: k`.
+Both are valid because the `EMA Averaging` schema declares `d` with `lt: k`.
 `{"k": 9, "d": 21}` would be rejected — that is the `EMA Crossover` template's
 shape, which declares the constraint the other way round.

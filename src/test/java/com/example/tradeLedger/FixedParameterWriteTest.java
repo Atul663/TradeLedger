@@ -6,6 +6,8 @@ import com.example.tradeLedger.entity.FixedParameter;
 import com.example.tradeLedger.exception.ResourceConflictException;
 import com.example.tradeLedger.exception.StrategyValidationException;
 import com.example.tradeLedger.repository.FixedParameterRepository;
+import com.example.tradeLedger.repository.SymbolRepository;
+import com.example.tradeLedger.serviceImpl.FixedParameterOptions;
 import com.example.tradeLedger.serviceImpl.FixedParameterServiceImpl;
 import com.example.tradeLedger.utils.JsonSupport;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -50,14 +52,19 @@ class FixedParameterWriteTest {
     @BeforeEach
     void setUp() {
         repository = mock(FixedParameterRepository.class);
-        service = new FixedParameterServiceImpl(repository, new JsonSupport(new ObjectMapper()));
+        SymbolRepository symbols = mock(SymbolRepository.class);
+        when(symbols.findByActiveTrueOrderBySymbolAsc()).thenReturn(List.of());
+        FixedParameterOptions options =
+                new FixedParameterOptions(symbols, new JsonSupport(new ObjectMapper()));
+        service = new FixedParameterServiceImpl(repository, options,
+                new JsonSupport(new ObjectMapper()));
         when(repository.save(any())).thenAnswer(call -> call.getArgument(0));
     }
 
     private static FixedParameterRequest request(String name, String dataType, String defaultValue) {
         FixedParameterRequest request = new FixedParameterRequest();
         request.setName(name);
-        request.setLabel("Stop loss %");
+        request.setLabel("SL %");
         request.setDataType(dataType);
         request.setDefaultValue(defaultValue);
         return request;
@@ -75,7 +82,7 @@ class FixedParameterWriteTest {
         FixedParameter parameter = new FixedParameter();
         parameter.setId(ID);
         parameter.setName("slPct");
-        parameter.setLabel("Stop loss %");
+        parameter.setLabel("SL %");
         parameter.setDataType(FixedParameter.TYPE_DECIMAL);
         parameter.setScope(FixedParameter.SCOPE_EXECUTION);
         parameter.setDefaultValue("2.5");
@@ -158,6 +165,24 @@ class FixedParameterWriteTest {
     }
 
     /**
+     * A symbol knob is a choice whose options are ROWS. Storing a list would
+     * freeze it, and it would be wrong the next time an instrument is listed - so
+     * unlike an enum it needs no options, and refuses to be given any.
+     */
+    @Test
+    void aSymbolKnobRefusesStoredOptionsAndNeedsNone() {
+        FixedParameterRequest authored = request("symbol", FixedParameter.TYPE_SYMBOL, null);
+        authored.setValidation(rules("options", List.of("NIFTY", "BANKNIFTY")));
+        assertTrue(assertThrows(StrategyValidationException.class,
+                () -> service.create(authored)).getMessage().contains("cannot be set on a symbol knob"));
+
+        FixedParameterResponse created = service.create(
+                request("symbol", FixedParameter.TYPE_SYMBOL, null));
+        assertEquals(FixedParameter.TYPE_SYMBOL, created.dataType(),
+                "no options is exactly right for this type");
+    }
+
+    /**
      * The knob it describes normalizes its timeframe through the same class, and
      * a descriptor that pre-filled '5M' would round-trip into a value the strategy
      * API then stored as '5m'.
@@ -231,7 +256,7 @@ class FixedParameterWriteTest {
 
         FixedParameter saved = captureSaved();
         assertEquals("3.0", saved.getDefaultValue());
-        assertEquals("Stop loss %", saved.getLabel());
+        assertEquals("SL %", saved.getLabel());
         assertEquals("exits", saved.getParamGroup());
         assertEquals(1, saved.getDisplayOrder());
     }

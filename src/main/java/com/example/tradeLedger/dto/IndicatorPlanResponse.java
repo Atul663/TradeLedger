@@ -28,7 +28,7 @@ public record IndicatorPlanResponse(
         int distinctIndicators,
 
         @Schema(description = "Every computation, resolved and deduplicated.",
-                example = "[\"EMA AVERAGING(d=21,k=50)\",\"EMA AVERAGING(d=9,k=21)\"]")
+                example = "[\"EMA Averaging(d=21,k=50)\",\"EMA Averaging(d=9,k=21)\"]")
         List<String> indicators) {
 
     public static IndicatorPlanResponse of(long activeStrategySubscriptions, int distinctInstances, List<String> indicators) {

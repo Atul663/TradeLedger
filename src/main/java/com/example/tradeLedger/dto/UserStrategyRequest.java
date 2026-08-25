@@ -156,7 +156,7 @@ public class UserStrategyRequest {
         private UUID indicatorId;
 
         @Schema(description = "The catalog indicator by name - indicators.name is unique and "
-                + "uppercased on save.", example = "EMA AVERAGING")
+                + "uppercased on save.", example = "EMA Averaging")
         private String indicatorName;
 
         @Schema(description = "Only needed when one template uses the same indicator twice.",

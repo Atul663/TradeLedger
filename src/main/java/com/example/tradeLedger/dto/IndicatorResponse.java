@@ -20,7 +20,7 @@ public record IndicatorResponse(
         UUID id,
 
         @Schema(description = "Uppercased on save; matched by exact string against rule trees.",
-                example = "EMA AVERAGING")
+                example = "EMA Averaging")
         String name,
 
         @Schema(example = "{\"k\": {\"type\":\"int\",\"min\":1,\"max\":300,\"default\":21}, "

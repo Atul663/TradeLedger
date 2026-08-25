@@ -7,8 +7,11 @@ import com.example.tradeLedger.entity.Derivative;
 import com.example.tradeLedger.entity.FixedParameter;
 import com.example.tradeLedger.entity.LotRule;
 import com.example.tradeLedger.entity.Moneyness;
+import com.example.tradeLedger.entity.Symbol;
 import com.example.tradeLedger.entity.UserStrategy;
 import com.example.tradeLedger.repository.FixedParameterRepository;
+import com.example.tradeLedger.repository.SymbolRepository;
+import com.example.tradeLedger.serviceImpl.FixedParameterOptions;
 import com.example.tradeLedger.serviceImpl.StrategyFixedParameters;
 import com.example.tradeLedger.utils.JsonSupport;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -43,30 +46,44 @@ import static org.mockito.Mockito.when;
 class StrategyFixedParametersTest {
 
     private FixedParameterRepository catalog;
+    private SymbolRepository symbols;
     private StrategyFixedParameters fixedParameters;
 
     @BeforeEach
     void setUp() {
         catalog = mock(FixedParameterRepository.class);
-        fixedParameters = new StrategyFixedParameters(catalog, new JsonSupport(new ObjectMapper()));
+        symbols = mock(SymbolRepository.class);
+        when(symbols.findByActiveTrueOrderBySymbolAsc()).thenReturn(List.of(
+                symbol("BANKNIFTY"), symbol("NIFTY")));
+        fixedParameters = new StrategyFixedParameters(catalog,
+                new FixedParameterOptions(symbols, new JsonSupport(new ObjectMapper())));
+    }
+
+    private static Symbol symbol(String ticker) {
+        Symbol symbol = new Symbol();
+        symbol.setId(UUID.randomUUID());
+        symbol.setSymbol(ticker);
+        symbol.setActive(true);
+        return symbol;
     }
 
     /** The catalog as the seeder leaves it, in the order the repository returns it. */
     private void seedCatalog() {
         when(catalog.findByActiveOrderByParamGroupAscDisplayOrderAscNameAsc(true)).thenReturn(List.of(
-                descriptor("exits", 1, "slPct", "decimal", """
+                descriptor("Exits", 1, "slPct", "decimal", """
                         {"min":0,"max":100}"""),
-                descriptor("exits", 2, "tpPct", "decimal", null),
-                descriptor("instrument", 1, "derivative", "enum", null),
-                descriptor("instrument", 2, "ceEnabled", "bool", null),
-                descriptor("instrument", 3, "ceMoneyness", "enum", null),
-                descriptor("instrument", 4, "ceStrikeOffset", "int", null),
-                descriptor("market", 1, "candleDuration", "timeframe", null),
-                descriptor("market", 2, "triggerDuration", "timeframe", null),
-                descriptor("sizing", 1, "lotRule", "enum", null),
-                descriptor("sizing", 2, "baseLot", "int", null),
+                descriptor("Exits", 2, "tpPct", "decimal", null),
+                descriptor("Instrument", 1, "derivative", "enum", null),
+                descriptor("Instrument", 2, "ceEnabled", "bool", null),
+                descriptor("Instrument", 3, "ceMoneyness", "enum", null),
+                descriptor("Instrument", 4, "ceStrikeOffset", "int", null),
+                descriptor("Market", 0, "symbol", FixedParameter.TYPE_SYMBOL, null),
+                descriptor("Market", 1, "candleDuration", "timeframe", null),
+                descriptor("Market", 2, "triggerDuration", "timeframe", null),
+                descriptor("Sizing", 1, "lotRule", "enum", null),
+                descriptor("Sizing", 2, "baseLot", "int", null),
                 // Describes a user_strategy_subscriptions column, not a strategy one.
-                descriptor("deployment", 4, "tradeMode", "enum", null)));
+                descriptor("Deployment", 4, "tradeMode", "enum", null)));
     }
 
     private static FixedParameter descriptor(String group, int order, String name,
@@ -86,6 +103,7 @@ class StrategyFixedParametersTest {
 
     private static UserStrategy strategy() {
         UserStrategy strategy = new UserStrategy();
+        strategy.setSymbol(symbol("NIFTY"));
         strategy.setCandleDuration("5m");
         strategy.setTriggerDuration("1m");
         strategy.setDerivative(Derivative.OPTION);
@@ -112,7 +130,7 @@ class StrategyFixedParametersTest {
 
         List<StrategyFixedParameterGroupResponse> groups = fixedParameters.forStrategy(strategy());
 
-        assertEquals(List.of("exits", "instrument", "market", "sizing"),
+        assertEquals(List.of("Exits", "Instrument", "Market", "Sizing"),
                 groups.stream().map(StrategyFixedParameterGroupResponse::paramGroup).toList(),
                 "the sections come back in the order the catalog is read in");
         assertEquals(List.of("slPct", "tpPct"),
@@ -168,10 +186,74 @@ class StrategyFixedParametersTest {
 
         List<StrategyFixedParameterGroupResponse> groups = fixedParameters.forStrategy(strategy());
 
-        assertTrue(groups.stream().noneMatch(group -> "deployment".equals(group.paramGroup())),
+        assertTrue(groups.stream().noneMatch(group -> "Deployment".equals(group.paramGroup())),
                 "a strategy does not carry the deployment knobs");
         assertTrue(byName(groups).keySet().stream().allMatch(StrategyFixedParameters.knobNames()::contains),
                 "only knobs this class knows how to read appear");
+    }
+
+    // ------------------------------------------------------- the symbol knob
+
+    /**
+     * The one knob whose choices are rows. Nothing is stored for it, so if the
+     * read path did not fill the list the form would render an empty select and
+     * the user could not pick a market at all.
+     */
+    @Test
+    void theSymbolKnobIsOfferedTheActiveSymbolsFromTheTable() {
+        seedCatalog();
+
+        StrategyFixedParameterResponse knob = byName(fixedParameters.forStrategy(strategy()))
+                .get("symbol");
+
+        assertEquals(FixedParameter.TYPE_SYMBOL, knob.dataType());
+        assertEquals(List.of("BANKNIFTY", "NIFTY"), knob.validation().get("options"),
+                "the tickers, in the order the table returns them");
+        assertEquals("/api/v1/symbols", knob.validation().get("optionsSource"));
+        assertEquals("NIFTY", knob.value(), "the ticker, matching the vocabulary of its options");
+    }
+
+    /** Listing an instrument has to change the list, which a stored copy could not do. */
+    @Test
+    void theSymbolOptionsFollowTheTable() {
+        seedCatalog();
+        when(symbols.findByActiveTrueOrderBySymbolAsc()).thenReturn(List.of(
+                symbol("BANKNIFTY"), symbol("FINNIFTY"), symbol("NIFTY")));
+
+        assertEquals(List.of("BANKNIFTY", "FINNIFTY", "NIFTY"),
+                byName(fixedParameters.forStrategy(strategy())).get("symbol").validation()
+                        .get("options"));
+    }
+
+    /**
+     * A ticker is unique per exchange, not globally, so the same one may sit on two
+     * venues - it is offered once and {@code exchangeCode} picks the venue. A
+     * repeated entry would render as a duplicate line nobody could tell apart.
+     */
+    @Test
+    void aTickerListedOnTwoExchangesIsOfferedOnce() {
+        seedCatalog();
+        when(symbols.findByActiveTrueOrderBySymbolAsc()).thenReturn(List.of(
+                symbol("NIFTY"), symbol("NIFTY")));
+
+        assertEquals(List.of("NIFTY"),
+                byName(fixedParameters.forStrategy(strategy())).get("symbol").validation()
+                        .get("options"));
+    }
+
+    /** A strategy saved on template defaults has no market yet - that is not an error. */
+    @Test
+    void aStrategyWithNoMarketReportsANullSymbolAndStillGetsTheOptions() {
+        seedCatalog();
+        UserStrategy blank = strategy();
+        blank.setSymbol(null);
+
+        StrategyFixedParameterResponse knob = byName(fixedParameters.forStrategy(blank))
+                .get("symbol");
+
+        assertNull(knob.value());
+        assertEquals(List.of("BANKNIFTY", "NIFTY"), knob.validation().get("options"),
+                "there is still a list to pick from");
     }
 
     /** The bounds a form enforces come back as a map, not as the stored JSON string. */

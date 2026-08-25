@@ -26,7 +26,7 @@ class IndicatorParamsTest {
     /** k is the EMA of the highs, d the shorter signal leg - so d stays under k. */
     private static Indicator emaAveraging() {
         Indicator indicator = new Indicator();
-        indicator.setName("EMA AVERAGING");
+        indicator.setName("EMA Averaging");
         indicator.setParamSchema("""
                 {"k":{"type":"int","min":1,"max":300,"default":21},\
                 "d":{"type":"int","min":1,"max":300,"default":9,"lt":"k"}}""");

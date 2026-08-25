@@ -36,7 +36,7 @@ import java.util.UUID;
  * <pre>
  *   fixed_parameters                    user_strategies
  *     name    'slPct'                     sl_pct numeric(6,2)   &lt;- the value
- *     label   'Stop loss %'
+ *     label   'SL %'
  *     type    'decimal'
  *     default '2.5'                     the descriptor, and the column it describes
  * </pre>
@@ -53,8 +53,9 @@ public class FixedParameter {
      * The legal {@link #dataType} values.
      *
      * The same vocabulary {@code indicators.param_schema} declares for its
-     * entries, plus {@code timeframe} - which the indicator side has no use for
-     * and the fixed side has two of (candle duration and trigger duration).
+     * entries, plus two the indicator side has no use for: {@code timeframe},
+     * which the fixed side has two of (candle duration and trigger duration), and
+     * {@code symbol}, which the fixed side has one of.
      */
     public static final String TYPE_INT = "int";
     public static final String TYPE_DECIMAL = "decimal";
@@ -63,8 +64,21 @@ public class FixedParameter {
     public static final String TYPE_TIMEFRAME = "timeframe";
     public static final String TYPE_TEXT = "text";
 
+    /**
+     * A choice, like {@link #TYPE_ENUM}, whose options are ROWS rather than a
+     * fixed vocabulary - the active {@code symbols}.
+     *
+     * It is a type of its own because an enum's options are stored in
+     * {@link #validation} and an admin's to author, and these are neither: a list
+     * copied into this table would be stale the moment an instrument is listed or
+     * retired. The knob declares what it is, and the read path fills
+     * {@code validation.options} from the table on the way out - so nothing here
+     * is stored, and nothing here can go stale.
+     */
+    public static final String TYPE_SYMBOL = "symbol";
+
     public static final Set<String> TYPES = Set.of(
-            TYPE_INT, TYPE_DECIMAL, TYPE_BOOL, TYPE_ENUM, TYPE_TIMEFRAME, TYPE_TEXT);
+            TYPE_INT, TYPE_DECIMAL, TYPE_BOOL, TYPE_ENUM, TYPE_TIMEFRAME, TYPE_TEXT, TYPE_SYMBOL);
 
     /**
      * Whether the knob changes WHAT is computed or only HOW it is executed.
@@ -91,7 +105,7 @@ public class FixedParameter {
     @Column(name = "name", nullable = false, unique = true, length = 100)
     private String name;
 
-    /** What a human sees next to the field - 'Stop loss %'. */
+    /** What a human sees next to the field - 'SL %'. */
     @Column(name = "label", nullable = false, length = 100)
     private String label;
 
@@ -127,7 +141,7 @@ public class FixedParameter {
     @Column(name = "validation", columnDefinition = "jsonb")
     private String validation;
 
-    /** The section of the form it belongs to - 'market', 'instrument', 'sizing', 'exits'. */
+    /** The section of the form it belongs to - 'Market', 'Instrument', 'Sizing', 'Exits'. */
     @Column(name = "param_group", length = 50)
     private String paramGroup;
 

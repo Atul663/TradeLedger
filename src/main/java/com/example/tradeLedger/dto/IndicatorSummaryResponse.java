@@ -20,7 +20,7 @@ public record IndicatorSummaryResponse(
         @Schema(example = "b2e4a1c8-1f3d-4e6a-9b2c-5d7e8f0a1b2c")
         UUID id,
 
-        @Schema(example = "EMA AVERAGING")
+        @Schema(example = "EMA Averaging")
         String name,
 
         @Schema(example = "true")

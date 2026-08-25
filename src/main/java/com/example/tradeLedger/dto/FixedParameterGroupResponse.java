@@ -8,8 +8,8 @@ import java.util.List;
  * One section of a form: the fixed-knob descriptors that share a
  * {@code paramGroup}.
  *
- * The grouping key is {@code fixed_parameters.param_group} - 'market',
- * 'instrument', 'sizing', 'exits', 'deployment' - which is exactly the section a
+ * The grouping key is {@code fixed_parameters.param_group} - 'Market',
+ * 'Instrument', 'Sizing', 'Exits', 'Deployment' - which is exactly the section a
  * form lays those fields out in. Carrying it as a FIELD rather than as a JSON key
  * means renaming a group changes a value and never the structure a client parses,
  * the same stance {@link UserStrategyGroupResponse} takes.
@@ -26,7 +26,7 @@ public record FixedParameterGroupResponse(
 
         @Schema(description = "The section these knobs belong to. Null for a descriptor that "
                 + "was never assigned one - those collect in a single trailing group.",
-                example = "exits")
+                example = "Exits")
         String paramGroup,
 
         @Schema(description = "How many descriptors are in this group, AFTER the filters have "

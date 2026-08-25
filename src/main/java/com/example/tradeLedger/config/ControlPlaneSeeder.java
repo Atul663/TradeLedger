@@ -20,8 +20,8 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <pre>
  *   indicators                       strategy_templates
- *     EMA CROSSOVER  k, d              EMA Crossover   -> EMA CROSSOVER
- *     EMA AVERAGING  k, d              EMA Averaging   -> EMA AVERAGING
+ *     EMA Crossover  k, d              EMA Crossover   -> EMA Crossover
+ *     EMA Averaging  k, d              EMA Averaging   -> EMA Averaging
  *     EMA            period
  *     RSI            period
  *
@@ -50,10 +50,10 @@ public class ControlPlaneSeeder implements ApplicationRunner {
     private static final Logger log = LoggerFactory.getLogger(ControlPlaneSeeder.class);
 
     public static final String EMA_CROSSOVER = "EMA Crossover";
-    public static final String EMA_CROSSOVER_INDICATOR = "EMA CROSSOVER";
+    public static final String EMA_CROSSOVER_INDICATOR = "EMA Crossover";
 
     public static final String EMA_AVERAGING = "EMA Averaging";
-    public static final String EMA_AVERAGING_INDICATOR = "EMA AVERAGING";
+    public static final String EMA_AVERAGING_INDICATOR = "EMA Averaging";
 
     /**
      * The classic crossover: a fast leg and a slow one, so {@code d} must exceed
@@ -73,11 +73,11 @@ public class ControlPlaneSeeder implements ApplicationRunner {
             "d":{"type":"int","min":1,"max":300,"default":9,"lt":"k"}}""";
 
     /** The sections a strategy form is laid out in, and the order they appear. */
-    private static final String GROUP_MARKET = "market";
-    private static final String GROUP_INSTRUMENT = "instrument";
-    private static final String GROUP_SIZING = "sizing";
-    private static final String GROUP_EXITS = "exits";
-    private static final String GROUP_DEPLOYMENT = "deployment";
+    private static final String GROUP_MARKET = "Market";
+    private static final String GROUP_INSTRUMENT = "Instrument";
+    private static final String GROUP_SIZING = "Sizing";
+    private static final String GROUP_EXITS = "Exits";
+    private static final String GROUP_DEPLOYMENT = "Deployment";
 
     /** Mirrors {@code ck_user_strategies_ce_strike} / {@code _pe_strike}. */
     private static final String STRIKE_OFFSET_BOUNDS = """
@@ -91,10 +91,10 @@ public class ControlPlaneSeeder implements ApplicationRunner {
             {"min":0,"max":100}""";
 
     private static final String EMA_CROSSOVER_TREE = """
-            {"entry":{"ind":"EMA CROSSOVER","params":{"k":"$k","d":"$d"}}}""";
+            {"entry":{"ind":"EMA Crossover","params":{"k":"$k","d":"$d"}}}""";
 
     private static final String EMA_AVERAGING_TREE = """
-            {"entry":{"ind":"EMA AVERAGING","params":{"k":"$k","d":"$d"}}}""";
+            {"entry":{"ind":"EMA Averaging","params":{"k":"$k","d":"$d"}}}""";
 
     private final IndicatorRepository indicatorRepository;
     private final StrategyTemplateRepository templateRepository;
@@ -209,6 +209,15 @@ public class ControlPlaneSeeder implements ApplicationRunner {
      * here mirrors it, so a form refuses what the database would have refused.
      */
     private void seedFixedParameters() {
+        // No stored options and none possible: the choices are the rows of
+        // `symbols`, and a copy here would be stale the next time an instrument is
+        // listed. FixedParameterOptions fills them from the table on read.
+        seedFixedParameter(GROUP_MARKET, 0, "symbol", "Underlying",
+                FixedParameter.TYPE_SYMBOL, FixedParameter.SCOPE_SIGNAL, null, null, true,
+                "The instrument the strategy trades. Part of the shared config's identity, so "
+                        + "two users on different underlyings cannot share one computation. "
+                        + "Tickers are unique per exchange, not globally - send exchangeCode "
+                        + "alongside it, or send symbolId instead.");
         seedFixedParameter(GROUP_MARKET, 1, "candleDuration", "Time frame",
                 FixedParameter.TYPE_TIMEFRAME, FixedParameter.SCOPE_SIGNAL, "5m", null, true,
                 "The candle the strategy evaluates on. Part of the shared config's identity, "
@@ -224,25 +233,25 @@ public class ControlPlaneSeeder implements ApplicationRunner {
                         {"options":["FUT","OPTION"]}""", true,
                 "Whether the signal is traded through the future or through options. The CE and "
                         + "PE sides apply only to OPTION.");
-        seedFixedParameter(GROUP_INSTRUMENT, 2, "ceEnabled", "Trade the call side",
+        seedFixedParameter(GROUP_INSTRUMENT, 2, "ceEnabled", "CALL (CE)",
                 FixedParameter.TYPE_BOOL, FixedParameter.SCOPE_EXECUTION, "false", null, false,
                 "Both sides may run at once.");
-        seedFixedParameter(GROUP_INSTRUMENT, 3, "ceMoneyness", "Call moneyness",
+        seedFixedParameter(GROUP_INSTRUMENT, 3, "ceMoneyness", "Strike",
                 FixedParameter.TYPE_ENUM, FixedParameter.SCOPE_EXECUTION, "ATM",
                 MONEYNESS_OPTIONS, false,
                 "Where the call strike sits relative to spot.");
-        seedFixedParameter(GROUP_INSTRUMENT, 4, "ceStrikeOffset", "Call strike depth",
+        seedFixedParameter(GROUP_INSTRUMENT, 4, "ceStrikeOffset", "Depth",
                 FixedParameter.TYPE_INT, FixedParameter.SCOPE_EXECUTION, "0",
                 STRIKE_OFFSET_BOUNDS, false,
                 "0 for ATM, 1..15 for ITM and OTM - 'OTM3' is 3.");
-        seedFixedParameter(GROUP_INSTRUMENT, 5, "peEnabled", "Trade the put side",
+        seedFixedParameter(GROUP_INSTRUMENT, 5, "peEnabled", "PUT (PE)",
                 FixedParameter.TYPE_BOOL, FixedParameter.SCOPE_EXECUTION, "false", null, false,
                 "Chosen independently of the call side.");
-        seedFixedParameter(GROUP_INSTRUMENT, 6, "peMoneyness", "Put moneyness",
+        seedFixedParameter(GROUP_INSTRUMENT, 6, "peMoneyness", "Strike",
                 FixedParameter.TYPE_ENUM, FixedParameter.SCOPE_EXECUTION, "ATM",
                 MONEYNESS_OPTIONS, false,
                 "Where the put strike sits relative to spot.");
-        seedFixedParameter(GROUP_INSTRUMENT, 7, "peStrikeOffset", "Put strike depth",
+        seedFixedParameter(GROUP_INSTRUMENT, 7, "peStrikeOffset", "Depth",
                 FixedParameter.TYPE_INT, FixedParameter.SCOPE_EXECUTION, "0",
                 STRIKE_OFFSET_BOUNDS, false,
                 "0 for ATM, 1..15 for ITM and OTM.");
@@ -264,12 +273,12 @@ public class ControlPlaneSeeder implements ApplicationRunner {
                         {"min":0,"max":10}""", false,
                 "How many times the strategy may add to a losing position. 0 means never.");
 
-        seedFixedParameter(GROUP_EXITS, 1, "slPct", "Stop loss %",
+        seedFixedParameter(GROUP_EXITS, 1, "slPct", "SL %",
                 FixedParameter.TYPE_DECIMAL, FixedParameter.SCOPE_EXECUTION, null,
                 PERCENT_BOUNDS, false,
                 "Percent move against the position that closes it. Empty means the strategy "
                         + "carries no stop of its own.");
-        seedFixedParameter(GROUP_EXITS, 2, "tpPct", "Take profit %",
+        seedFixedParameter(GROUP_EXITS, 2, "tpPct", "TP %",
                 FixedParameter.TYPE_DECIMAL, FixedParameter.SCOPE_EXECUTION, null,
                 PERCENT_BOUNDS, false,
                 "Percent move in favour of the position that closes it.");

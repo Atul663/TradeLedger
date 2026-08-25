@@ -92,7 +92,7 @@ public record StrategySubscriptionResponse(
         Map<String, Object> signalParams,
 
         @Schema(description = "The concrete computations this configuration needs.",
-                example = "[\"EMA AVERAGING(d=9,k=21)\"]")
+                example = "[\"EMA Averaging(d=9,k=21)\"]")
         List<String> indicators,
 
         // ------------------------------------------------------ where it runs

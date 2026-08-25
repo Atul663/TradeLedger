@@ -4,6 +4,8 @@ import com.example.tradeLedger.dto.FixedParameterGroupResponse;
 import com.example.tradeLedger.dto.FixedParameterResponse;
 import com.example.tradeLedger.entity.FixedParameter;
 import com.example.tradeLedger.repository.FixedParameterRepository;
+import com.example.tradeLedger.repository.SymbolRepository;
+import com.example.tradeLedger.serviceImpl.FixedParameterOptions;
 import com.example.tradeLedger.serviceImpl.FixedParameterServiceImpl;
 import com.example.tradeLedger.utils.JsonSupport;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -35,7 +37,12 @@ class FixedParameterGroupedReadTest {
     @BeforeEach
     void setUp() {
         repository = mock(FixedParameterRepository.class);
-        service = new FixedParameterServiceImpl(repository, new JsonSupport(new ObjectMapper()));
+        SymbolRepository symbols = mock(SymbolRepository.class);
+        when(symbols.findByActiveTrueOrderBySymbolAsc()).thenReturn(List.of());
+        FixedParameterOptions options =
+                new FixedParameterOptions(symbols, new JsonSupport(new ObjectMapper()));
+        service = new FixedParameterServiceImpl(repository, options,
+                new JsonSupport(new ObjectMapper()));
     }
 
     private static FixedParameter row(String group, int order, String name, String scope) {
@@ -54,11 +61,11 @@ class FixedParameterGroupedReadTest {
     /** The repository's own ordering: by group, then position, then name. */
     private void seed() {
         when(repository.findAllByOrderByParamGroupAscDisplayOrderAscNameAsc()).thenReturn(List.of(
-                row("exits", 1, "slPct", FixedParameter.SCOPE_EXECUTION),
-                row("exits", 2, "tpPct", FixedParameter.SCOPE_EXECUTION),
-                row("market", 1, "candleDuration", FixedParameter.SCOPE_SIGNAL),
-                row("market", 2, "triggerDuration", FixedParameter.SCOPE_EXECUTION),
-                row("sizing", 1, "baseLot", FixedParameter.SCOPE_EXECUTION)));
+                row("Exits", 1, "slPct", FixedParameter.SCOPE_EXECUTION),
+                row("Exits", 2, "tpPct", FixedParameter.SCOPE_EXECUTION),
+                row("Market", 1, "candleDuration", FixedParameter.SCOPE_SIGNAL),
+                row("Market", 2, "triggerDuration", FixedParameter.SCOPE_EXECUTION),
+                row("Sizing", 1, "baseLot", FixedParameter.SCOPE_EXECUTION)));
     }
 
     private static List<String> names(FixedParameterGroupResponse group) {
@@ -71,7 +78,7 @@ class FixedParameterGroupedReadTest {
 
         List<FixedParameterGroupResponse> groups = service.listGrouped(null, null, null);
 
-        assertEquals(List.of("exits", "market", "sizing"),
+        assertEquals(List.of("Exits", "Market", "Sizing"),
                 groups.stream().map(FixedParameterGroupResponse::paramGroup).toList());
         assertEquals(List.of("slPct", "tpPct"), names(groups.get(0)),
                 "rows keep the flat list's order inside a group");
@@ -100,7 +107,7 @@ class FixedParameterGroupedReadTest {
         List<FixedParameterGroupResponse> groups = service.listGrouped("MARKET", null, null);
 
         assertEquals(1, groups.size());
-        assertEquals("market", groups.get(0).paramGroup());
+        assertEquals("Market", groups.get(0).paramGroup());
         assertEquals(List.of("candleDuration", "triggerDuration"), names(groups.get(0)));
     }
 
@@ -125,7 +132,7 @@ class FixedParameterGroupedReadTest {
     void ungroupedDescriptorsCollectUnderANullGroup() {
         when(repository.findAllByOrderByParamGroupAscDisplayOrderAscNameAsc()).thenReturn(List.of(
                 row(null, 1, "orphan", FixedParameter.SCOPE_EXECUTION),
-                row("exits", 1, "slPct", FixedParameter.SCOPE_EXECUTION)));
+                row("Exits", 1, "slPct", FixedParameter.SCOPE_EXECUTION)));
 
         List<FixedParameterGroupResponse> groups = service.listGrouped(null, null, null);
 

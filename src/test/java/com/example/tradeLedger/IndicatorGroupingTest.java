@@ -270,7 +270,7 @@ class IndicatorGroupingTest {
     void theCountsCoverExactlyTheNamesTheResolverReports() {
         JsonSupport json = new JsonSupport(new ObjectMapper());
         var tree = json.readTree("""
-                {"entry": {"ind": "EMA AVERAGING", "params": {"k": "$k", "d": "$d"}},
+                {"entry": {"ind": "EMA Averaging", "params": {"k": "$k", "d": "$d"}},
                  "exit":  {"ind": "RSI", "params": {"period": 14}}}""");
 
         assertEquals(IndicatorResolver.indicatorNames(tree),

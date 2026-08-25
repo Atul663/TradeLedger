@@ -106,13 +106,13 @@ public class FixedParameterController extends SecuredController {
                                     description = "The descriptor behind user_strategies.sl_pct.",
                                     value = """
                                             { "name": "slPct",
-                                              "label": "Stop loss %",
+                                              "label": "SL %",
                                               "description": "Percent move against the position that closes it.",
                                               "dataType": "decimal",
                                               "scope": "execution",
                                               "defaultValue": "2.5",
                                               "validation": { "min": 0, "max": 100 },
-                                              "paramGroup": "exits",
+                                              "paramGroup": "Exits",
                                               "displayOrder": 1,
                                               "required": false }"""),
                             @ExampleObject(name = "A choice",
@@ -125,7 +125,7 @@ public class FixedParameterController extends SecuredController {
                                               "scope": "execution",
                                               "defaultValue": "FIXED",
                                               "validation": { "options": ["FIXED", "DOUBLE", "CUMULATIVE"] },
-                                              "paramGroup": "sizing",
+                                              "paramGroup": "Sizing",
                                               "displayOrder": 1,
                                               "required": true }"""),
                             @ExampleObject(name = "A candle",
@@ -137,7 +137,7 @@ public class FixedParameterController extends SecuredController {
                                               "dataType": "timeframe",
                                               "scope": "signal",
                                               "defaultValue": "5m",
-                                              "paramGroup": "market",
+                                              "paramGroup": "Market",
                                               "displayOrder": 2,
                                               "required": true }"""),
                             @ExampleObject(name = "A whole number with a floor and a ceiling",
@@ -147,7 +147,7 @@ public class FixedParameterController extends SecuredController {
                                               "dataType": "int",
                                               "defaultValue": "0",
                                               "validation": { "min": 0, "max": 10 },
-                                              "paramGroup": "sizing",
+                                              "paramGroup": "Sizing",
                                               "displayOrder": 3 }""")
                     }))
     public FixedParameterResponse create(@RequestBody FixedParameterRequest request) {

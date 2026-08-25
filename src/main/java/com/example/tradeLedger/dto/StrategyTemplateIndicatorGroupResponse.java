@@ -22,7 +22,7 @@ import java.util.List;
 public record StrategyTemplateIndicatorGroupResponse(
 
         @Schema(description = "The group's tag - the indicator's name, exactly as the rule tree "
-                + "spells it.", example = "EMA AVERAGING")
+                + "spells it.", example = "EMA Averaging")
         String indicatorName,
 
         @Schema(description = "How many nodes of the rule tree name this indicator.", example = "1")

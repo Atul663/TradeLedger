@@ -106,8 +106,8 @@ public class OpenApiConfig {
                                 "derivative is OPTION but neither side is on - enable ceEnabled, peEnabled, or both",
                                 "averagingCount must be 0..10, got 25" ] }"""),
                     example("Indicator value rejected", """
-                            { "error": "Indicator 'EMA AVERAGING' parameter 'd' must be less than 'k' (21 vs 9)",
-                              "errors": [ "Indicator 'EMA AVERAGING' parameter 'd' must be less than 'k' (21 vs 9)" ] }"""));
+                            { "error": "Indicator 'EMA Averaging' parameter 'd' must be less than 'k' (21 vs 9)",
+                              "errors": [ "Indicator 'EMA Averaging' parameter 'd' must be less than 'k' (21 vs 9)" ] }"""));
 
             addIfAbsent(responses, "401",
                     "Missing, invalid or expired Bearer token.",

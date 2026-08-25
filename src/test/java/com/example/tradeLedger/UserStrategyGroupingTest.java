@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -84,10 +85,15 @@ class UserStrategyGroupingTest {
     }
 
     private static StrategyTemplate template(UUID id, String name) {
+        return template(id, name, true);
+    }
+
+    private static StrategyTemplate template(UUID id, String name, boolean system) {
         StrategyTemplate template = new StrategyTemplate();
         template.setId(id);
         template.setName(name);
         template.setDescription(name + " logic");
+        template.setSystem(system);
         return template;
     }
 
@@ -197,6 +203,28 @@ class UserStrategyGroupingTest {
         assertEquals(1, groups.size());
         assertEquals(List.of("live"), names(groups.get(0)));
         assertEquals(1, groups.get(0).count());
+    }
+
+    /**
+     * A seeded template is locked, so the logic behind a strategy built on one can
+     * never change under it - that is the difference a UI has to be able to show,
+     * and it is a fact about the TEMPLATE, not about the caller's own row.
+     */
+    @Test
+    void everyRowAndItsHeadingCarryTheTemplatesSystemFlag() {
+        StrategyTemplate seeded = template(AVERAGING_ID, "EMA Averaging", true);
+        StrategyTemplate authored = template(CROSSOVER_ID, "EMA Crossover", false);
+        when(strategies.findByUser_IdOrderByCreatedAtAsc(USER_ID)).thenReturn(List.of(
+                strategy("on a system template", seeded, true),
+                strategy("on an authored one", authored, true)));
+
+        List<UserStrategyGroupResponse> groups = service.listGrouped(EMAIL, null, null);
+
+        assertTrue(groups.get(0).strategySystem(), "EMA Averaging is seeded");
+        assertFalse(groups.get(1).strategySystem(), "EMA Crossover was published through the API");
+        groups.forEach(group -> group.strategies().forEach(row ->
+                assertEquals(group.strategySystem(), row.strategySystem(),
+                        "a heading and its rows cannot disagree about the template")));
     }
 
     @Test

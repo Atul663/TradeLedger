@@ -56,7 +56,7 @@ public record SharedStrategyConfigResponse(
         String status,
 
         @Schema(description = "The concrete computations this instance needs.",
-                example = "[\"EMA AVERAGING(d=9,k=21)\"]")
+                example = "[\"EMA Averaging(d=9,k=21)\"]")
         List<String> indicators,
 
         @Schema(description = "How many active deployments feed off it. At zero it is retired.",

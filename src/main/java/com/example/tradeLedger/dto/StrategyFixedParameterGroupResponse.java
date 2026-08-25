@@ -9,7 +9,7 @@ import java.util.List;
  * share a {@code paramGroup}.
  *
  * The value-bearing counterpart of {@link FixedParameterGroupResponse}. Only the
- * knobs a {@code user_strategies} row actually carries appear - the 'deployment'
+ * knobs a {@code user_strategies} row actually carries appear - the 'Deployment'
  * group describes subscription columns and belongs to the deployment shape, not
  * to a strategy.
  */
@@ -20,8 +20,8 @@ import java.util.List;
 public record StrategyFixedParameterGroupResponse(
 
         @Schema(description = "The section these knobs belong to.",
-                example = "instrument",
-                allowableValues = {"market", "instrument", "sizing", "exits"})
+                example = "Instrument",
+                allowableValues = {"Market", "Instrument", "Sizing", "Exits"})
         String paramGroup,
 
         @Schema(description = "How many knobs are in this group.", example = "7")

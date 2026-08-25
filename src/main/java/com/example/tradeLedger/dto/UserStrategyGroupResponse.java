@@ -38,6 +38,11 @@ public record UserStrategyGroupResponse(
                 + "or the future, with a configurable averaging ladder.")
         String strategyDescription,
 
+        @Schema(description = "Whether the template this group is tagged with is a seeded "
+                + "platform one - the same flag every row inside carries as strategySystem.",
+                example = "true")
+        boolean strategySystem,
+
         @Schema(description = "How many of the caller's strategies are in this group, AFTER the "
                 + "active filter has been applied.", example = "2")
         int count,
