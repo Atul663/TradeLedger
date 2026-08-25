@@ -65,15 +65,53 @@ public class FixedParameterOptions {
      * @return a fresh map, empty for an unbounded knob - never null
      */
     public Map<String, Object> validation(FixedParameter parameter) {
-        Map<String, Object> rules = new LinkedHashMap<>(json.toMap(parameter.getValidation()));
-        if (FixedParameter.TYPE_SYMBOL.equals(parameter.getDataType())) {
-            rules.put(KEY_OPTIONS, symbolOptions());
-            rules.put(KEY_OPTIONS_SOURCE, SYMBOLS_SOURCE);
-        } else if (FixedParameter.TYPE_EXCHANGE.equals(parameter.getDataType())) {
-            rules.put(KEY_OPTIONS, exchangeOptions());
-            rules.put(KEY_OPTIONS_SOURCE, EXCHANGES_SOURCE);
+        return snapshot().validation(parameter);
+    }
+
+    /**
+     * One reusable read of the reference tables, for a response that describes the
+     * same knobs many times over.
+     *
+     * A list of fifty strategies renders the SAME symbol and exchange lists fifty
+     * times; asking the database each time is fifty round trips for one answer
+     * that cannot change inside a transaction. A snapshot reads each table at most
+     * once and answers from memory after that.
+     *
+     * <b>Lazy per table.</b> Building one costs nothing - a response with no
+     * reference knob in it never touches either table. Hold one for the length of
+     * a request and no longer: it is a cache with the lifetime of the answer it
+     * serves, which is what keeps the options as fresh as the request that asked.
+     */
+    public Snapshot snapshot() {
+        return new Snapshot();
+    }
+
+    public final class Snapshot {
+
+        private List<String> symbols;
+        private List<String> exchanges;
+
+        private Snapshot() {
         }
-        return rules;
+
+        /** The descriptor's stored bounds, with table-backed options filled in. */
+        public Map<String, Object> validation(FixedParameter parameter) {
+            Map<String, Object> rules = new LinkedHashMap<>(json.toMap(parameter.getValidation()));
+            if (FixedParameter.TYPE_SYMBOL.equals(parameter.getDataType())) {
+                if (symbols == null) {
+                    symbols = symbolOptions();
+                }
+                rules.put(KEY_OPTIONS, symbols);
+                rules.put(KEY_OPTIONS_SOURCE, SYMBOLS_SOURCE);
+            } else if (FixedParameter.TYPE_EXCHANGE.equals(parameter.getDataType())) {
+                if (exchanges == null) {
+                    exchanges = exchangeOptions();
+                }
+                rules.put(KEY_OPTIONS, exchanges);
+                rules.put(KEY_OPTIONS_SOURCE, EXCHANGES_SOURCE);
+            }
+            return rules;
+        }
     }
 
     /**

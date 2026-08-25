@@ -66,11 +66,22 @@ public class UserStrategyController extends SecuredController {
 
     @GetMapping("/grouped")
     @Operation(summary = "List the caller's strategies grouped by template",
-            description = "The same rows as the flat list, arranged one group per "
-                    + "`strategyId` and tagged with that template's `strategyName`. Groups are "
-                    + "ordered by name, rows inside a group oldest first, and a template the "
-                    + "caller has built nothing from produces no group. The same `active` and "
-                    + "`strategyId` filters apply - `strategyId` narrows it to that one group.")
+            description = """
+                    The same rows as the flat list, arranged one group per `strategyId`. Groups \
+                    are ordered by name, rows inside a group oldest first, and a template the \
+                    caller has built nothing from produces no group. The same `active` and \
+                    `strategyId` filters apply - `strategyId` narrows it to that one group.
+
+                    Each group is tagged with its template: `strategyName`, \
+                    `strategyDescription`, `strategySystem` (a seeded template is locked, so the \
+                    logic cannot change under you) and `instanceCount` (shared computations for \
+                    that template across ALL users - it may exceed `count`, which is only the \
+                    caller's rows).
+
+                    **The rows are complete.** Each entry in `strategies[]` is the identical \
+                    `UserStrategyResponse` the flat list returns - `legs[]`, `indicators[]`, \
+                    `indicatorGroups[]`, `fixedParameters[]`, `configHash`, `deployable` and \
+                    all. There is one mapper behind both shapes, so they cannot drift.""")
     public List<UserStrategyGroupResponse> listGrouped(
             @Parameter(description = "true for live, false for archived, omit for all")
             @RequestParam(required = false) Boolean active,

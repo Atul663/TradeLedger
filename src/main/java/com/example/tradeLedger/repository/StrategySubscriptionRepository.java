@@ -2,12 +2,31 @@ package com.example.tradeLedger.repository;
 
 import com.example.tradeLedger.entity.StrategySubscription;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 public interface StrategySubscriptionRepository extends JpaRepository<StrategySubscription, UUID> {
+
+    /**
+     * How many deployments each of these strategies has, in ONE query.
+     *
+     * Every strategy in a list response reports its deployment count, and asking
+     * per row is a round trip per row - the difference between one query and
+     * fifty on a busy account. Returned as {@code [strategyId, count]} pairs;
+     * <b>a strategy with no deployments is absent rather than zero</b>, because a
+     * GROUP BY has no row to produce for it, so callers default a miss to 0.
+     */
+    @Query("""
+            select s.userStrategy.id, count(s)
+              from StrategySubscription s
+             where s.userStrategy.id in :userStrategyIds
+             group by s.userStrategy.id""")
+    List<Object[]> countByUserStrategyIds(@Param("userStrategyIds") Collection<UUID> userStrategyIds);
 
     List<StrategySubscription> findByUser_IdOrderByCreatedAtAsc(UUID userId);
 

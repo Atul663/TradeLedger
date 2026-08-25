@@ -73,25 +73,70 @@ public class StrategyFixedParameters {
      * @return an empty list if the catalog has been emptied; never null
      */
     public List<StrategyFixedParameterGroupResponse> forStrategy(UserStrategy strategy) {
-        List<StrategyFixedParameterGroupResponse> groups = new ArrayList<>();
-        forEachGroup((group, rows) -> {
-            List<StrategyFixedParameterResponse> parameters = rows.stream()
-                    .map(row -> new StrategyFixedParameterResponse(
-                            row.getId(),
-                            row.getName(),
-                            row.getLabel(),
-                            row.getDescription(),
-                            row.getDataType(),
-                            row.getScope(),
-                            VALUE_READERS.get(row.getName()).read(strategy),
-                            row.getDefaultValue(),
-                            options.validation(row),
-                            row.getDisplayOrder(),
-                            row.isRequired()))
-                    .toList();
-            groups.add(new StrategyFixedParameterGroupResponse(group, parameters.size(), parameters));
-        });
-        return groups;
+        return snapshot().forStrategy(strategy);
+    }
+
+    /**
+     * One reusable read of the catalog, for a response that renders the same form
+     * for many strategies.
+     *
+     * The descriptors and their options are IDENTICAL for every strategy in a
+     * list - only the values differ - so reading them per row is one round trip
+     * per row for an answer that does not vary. A snapshot reads the catalog once,
+     * carries one {@link FixedParameterOptions.Snapshot} with it, and answers the
+     * rest from memory.
+     *
+     * Hold one for the length of a request and no longer.
+     */
+    public Snapshot snapshot() {
+        return new Snapshot();
+    }
+
+    public final class Snapshot {
+
+        private final Map<String, List<FixedParameter>> byGroup;
+        private final FixedParameterOptions.Snapshot optionsSnapshot;
+
+        private Snapshot() {
+            this.byGroup = groupedRows();
+            this.optionsSnapshot = options.snapshot();
+        }
+
+        /** One saved strategy's fixed knobs, with values, grouped by section. */
+        public List<StrategyFixedParameterGroupResponse> forStrategy(UserStrategy strategy) {
+            List<StrategyFixedParameterGroupResponse> groups = new ArrayList<>();
+            byGroup.forEach((group, rows) -> {
+                List<StrategyFixedParameterResponse> parameters = rows.stream()
+                        .map(row -> new StrategyFixedParameterResponse(
+                                row.getId(),
+                                row.getName(),
+                                row.getLabel(),
+                                row.getDescription(),
+                                row.getDataType(),
+                                row.getScope(),
+                                VALUE_READERS.get(row.getName()).read(strategy),
+                                row.getDefaultValue(),
+                                optionsSnapshot.validation(row),
+                                row.getDisplayOrder(),
+                                row.isRequired()))
+                        .toList();
+                groups.add(new StrategyFixedParameterGroupResponse(
+                        group, parameters.size(), parameters));
+            });
+            return groups;
+        }
+
+        /** The same sections with no values in them - what a template can say. */
+        public List<FixedParameterGroupResponse> descriptors() {
+            List<FixedParameterGroupResponse> groups = new ArrayList<>();
+            byGroup.forEach((group, rows) -> {
+                List<FixedParameterResponse> parameters = rows.stream()
+                        .map(row -> toResponse(row, optionsSnapshot))
+                        .toList();
+                groups.add(new FixedParameterGroupResponse(group, parameters.size(), parameters));
+            });
+            return groups;
+        }
     }
 
     /**
@@ -103,26 +148,18 @@ public class StrategyFixedParameters {
      * fields exist and in what order because they walk the same catalog rows.
      */
     public List<FixedParameterGroupResponse> descriptors() {
-        List<FixedParameterGroupResponse> groups = new ArrayList<>();
-        forEachGroup((group, rows) -> {
-            List<FixedParameterResponse> parameters = rows.stream()
-                    .map(this::toResponse)
-                    .toList();
-            groups.add(new FixedParameterGroupResponse(group, parameters.size(), parameters));
-        });
-        return groups;
+        return snapshot().descriptors();
     }
 
     /**
-     * Walks the ACTIVE strategy-scope descriptors in catalog order, handing each
-     * run of same-group rows to the caller.
+     * The ACTIVE strategy-scope descriptors, in catalog order, collected by group.
      *
      * The repository already orders by group, so a LinkedHashMap collects the runs
      * and preserves the order the catalog put them in. Retired descriptors are
      * skipped - deactivating one is the non-destructive way to take a field off a
      * form, and it has to take it off this one too.
      */
-    private void forEachGroup(GroupSink sink) {
+    private Map<String, List<FixedParameter>> groupedRows() {
         Map<String, List<FixedParameter>> byGroup = new LinkedHashMap<>();
         for (FixedParameter row
                 : repository.findByActiveOrderByParamGroupAscDisplayOrderAscNameAsc(true)) {
@@ -130,10 +167,11 @@ public class StrategyFixedParameters {
                 byGroup.computeIfAbsent(row.getParamGroup(), key -> new ArrayList<>()).add(row);
             }
         }
-        byGroup.forEach(sink::accept);
+        return byGroup;
     }
 
-    private FixedParameterResponse toResponse(FixedParameter row) {
+    private FixedParameterResponse toResponse(FixedParameter row,
+                                              FixedParameterOptions.Snapshot optionsSnapshot) {
         return new FixedParameterResponse(
                 row.getId(),
                 row.getName(),
@@ -142,7 +180,7 @@ public class StrategyFixedParameters {
                 row.getDataType(),
                 row.getScope(),
                 row.getDefaultValue(),
-                options.validation(row),
+                optionsSnapshot.validation(row),
                 row.getParamGroup(),
                 row.getDisplayOrder(),
                 row.isRequired(),
@@ -187,10 +225,5 @@ public class StrategyFixedParameters {
     @FunctionalInterface
     private interface ValueReader {
         Object read(UserStrategy strategy);
-    }
-
-    @FunctionalInterface
-    private interface GroupSink {
-        void accept(String paramGroup, List<FixedParameter> rows);
     }
 }

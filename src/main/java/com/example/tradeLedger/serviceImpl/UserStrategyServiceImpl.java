@@ -27,6 +27,7 @@ import com.example.tradeLedger.exception.ResourceNotFoundException;
 import com.example.tradeLedger.exception.StrategyValidationException;
 import com.example.tradeLedger.indicator.IndicatorResolver;
 import com.example.tradeLedger.repository.IndicatorRepository;
+import com.example.tradeLedger.repository.SharedStrategyConfigRepository;
 import com.example.tradeLedger.repository.StrategySubscriptionRepository;
 import com.example.tradeLedger.repository.StrategyTemplateRepository;
 import com.example.tradeLedger.repository.TradingAccountRepository;
@@ -63,6 +64,7 @@ public class UserStrategyServiceImpl implements UserStrategyService {
     private final StrategyTemplateRepository templateRepository;
     private final IndicatorRepository indicatorRepository;
     private final StrategySubscriptionRepository subscriptionRepository;
+    private final SharedStrategyConfigRepository sharedConfigRepository;
     private final TradingAccountRepository tradingAccountRepository;
     private final UserBrokerRepository userBrokerRepository;
     private final SharedStrategyConfigService sharedConfigService;
@@ -80,6 +82,7 @@ public class UserStrategyServiceImpl implements UserStrategyService {
                                    StrategyTemplateRepository templateRepository,
                                    IndicatorRepository indicatorRepository,
                                    StrategySubscriptionRepository subscriptionRepository,
+                                   SharedStrategyConfigRepository sharedConfigRepository,
                                    TradingAccountRepository tradingAccountRepository,
                                    UserBrokerRepository userBrokerRepository,
                                    SharedStrategyConfigService sharedConfigService,
@@ -96,6 +99,7 @@ public class UserStrategyServiceImpl implements UserStrategyService {
         this.templateRepository = templateRepository;
         this.indicatorRepository = indicatorRepository;
         this.subscriptionRepository = subscriptionRepository;
+        this.sharedConfigRepository = sharedConfigRepository;
         this.tradingAccountRepository = tradingAccountRepository;
         this.userBrokerRepository = userBrokerRepository;
         this.sharedConfigService = sharedConfigService;
@@ -113,38 +117,106 @@ public class UserStrategyServiceImpl implements UserStrategyService {
     @Override
     @Transactional(readOnly = true)
     public List<UserStrategyResponse> list(String email, Boolean active, UUID strategyId) {
-        return ownedRows(email, active, strategyId).stream()
-                .map(this::toResponse)
-                .toList();
+        List<UserStrategy> rows = ownedRows(email, active, strategyId);
+        Batch batch = Batch.of(rows, indicatorRowRepository, subscriptionRepository,
+                fixedParameters);
+        return rows.stream().map(row -> toResponse(row, batch)).toList();
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<UserStrategyGroupResponse> listGrouped(String email, Boolean active, UUID strategyId) {
+        List<UserStrategy> rows = ownedRows(email, active, strategyId);
+        Batch batch = Batch.of(rows, indicatorRowRepository, subscriptionRepository,
+                fixedParameters);
+
         // Insertion-ordered so the rows inside each group keep the flat list's
         // oldest-first order; the GROUPS are then sorted by the name they are
         // tagged with, which is the order a list screen reads them in.
         Map<UUID, List<UserStrategy>> byTemplate = new LinkedHashMap<>();
-        for (UserStrategy row : ownedRows(email, active, strategyId)) {
+        for (UserStrategy row : rows) {
             byTemplate.computeIfAbsent(row.getStrategy().getId(), key -> new ArrayList<>()).add(row);
         }
 
+        // One query for every group's instance count rather than one per group -
+        // it is a platform-wide fact about the template, so it is read from the
+        // shared config table rather than from the caller's rows.
+        Map<UUID, Long> instanceCounts = counts(
+                sharedConfigRepository.countByStrategyIds(byTemplate.keySet()));
+
         List<UserStrategyGroupResponse> groups = new ArrayList<>(byTemplate.size());
-        for (List<UserStrategy> rows : byTemplate.values()) {
+        for (List<UserStrategy> group : byTemplate.values()) {
             // Every row in the group came from the same template, so any of them
             // can supply the tag.
-            StrategyTemplate template = rows.get(0).getStrategy();
+            StrategyTemplate template = group.get(0).getStrategy();
             groups.add(new UserStrategyGroupResponse(
                     template.getId(),
                     template.getName(),
                     template.getDescription(),
                     template.isSystem(),
-                    rows.size(),
-                    rows.stream().map(this::toResponse).toList()));
+                    group.size(),
+                    instanceCounts.getOrDefault(template.getId(), 0L),
+                    group.stream().map(row -> toResponse(row, batch)).toList()));
         }
         groups.sort(Comparator.comparing(UserStrategyGroupResponse::strategyName,
                 String.CASE_INSENSITIVE_ORDER));
         return groups;
+    }
+
+    /** {@code [id, count]} pairs to a map; a GROUP BY omits the zeroes. */
+    private static Map<UUID, Long> counts(List<Object[]> pairs) {
+        Map<UUID, Long> counts = new LinkedHashMap<>();
+        for (Object[] pair : pairs) {
+            counts.put((UUID) pair[0], ((Number) pair[1]).longValue());
+        }
+        return counts;
+    }
+
+    /**
+     * Everything a list response needs that would otherwise be fetched per row.
+     *
+     * A response over N strategies asks the same three questions N times - what
+     * are this row's indicators, how many deployments has it, and what does the
+     * fixed-knob form look like - and only the first has a different answer per
+     * row. Asking per row is a database round trip per row; on a remote database
+     * that is the whole latency of the endpoint. This asks once.
+     *
+     * Built from the rows the response is about, so it never holds more than the
+     * request needs, and discarded with the response.
+     */
+    private record Batch(Map<UUID, List<UserStrategyIndicator>> indicatorRows,
+                         Map<UUID, Long> deploymentCounts,
+                         StrategyFixedParameters.Snapshot fixedParameters) {
+
+        static Batch of(List<UserStrategy> rows,
+                        UserStrategyIndicatorRepository indicatorRowRepository,
+                        StrategySubscriptionRepository subscriptionRepository,
+                        StrategyFixedParameters fixedParameters) {
+            List<UUID> ids = rows.stream().map(UserStrategy::getId).toList();
+            if (ids.isEmpty()) {
+                // No rows means no questions to ask - and an empty IN () is a
+                // query some databases refuse outright.
+                return new Batch(Map.of(), Map.of(), fixedParameters.snapshot());
+            }
+
+            Map<UUID, List<UserStrategyIndicator>> byStrategy = new LinkedHashMap<>();
+            for (UserStrategyIndicator row : indicatorRowRepository
+                    .findByUserStrategy_IdInOrderByUserStrategy_IdAscDisplayOrderAsc(ids)) {
+                byStrategy.computeIfAbsent(row.getUserStrategy().getId(), key -> new ArrayList<>())
+                        .add(row);
+            }
+            return new Batch(byStrategy,
+                    counts(subscriptionRepository.countByUserStrategyIds(ids)),
+                    fixedParameters.snapshot());
+        }
+
+        List<UserStrategyIndicator> indicatorsOf(UserStrategy strategy) {
+            return indicatorRows.getOrDefault(strategy.getId(), List.of());
+        }
+
+        long deploymentsOf(UserStrategy strategy) {
+            return deploymentCounts.getOrDefault(strategy.getId(), 0L);
+        }
     }
 
     /**
@@ -732,7 +804,13 @@ public class UserStrategyServiceImpl implements UserStrategyService {
 
     // -------------------------------------------------------------- mapping
 
+    /** The single-strategy path: a batch of one, so there is one mapper, not two. */
     private UserStrategyResponse toResponse(UserStrategy strategy) {
+        return toResponse(strategy, Batch.of(List.of(strategy), indicatorRowRepository,
+                subscriptionRepository, fixedParameters));
+    }
+
+    private UserStrategyResponse toResponse(UserStrategy strategy, Batch batch) {
         StrategyTemplate template = strategy.getStrategy();
         Symbol symbol = strategy.getSymbol();
         SharedStrategyConfig config = strategy.getSharedConfig();
@@ -745,7 +823,7 @@ public class UserStrategyServiceImpl implements UserStrategyService {
         Map<String, Indicator> groupIndicator = new LinkedHashMap<>();
         Map<String, List<UserStrategyIndicatorResponse>> byName = new LinkedHashMap<>();
 
-        for (UserStrategyIndicator row : indicatorRows(strategy)) {
+        for (UserStrategyIndicator row : batch.indicatorsOf(strategy)) {
             Indicator indicator = row.getIndicator();
             UserStrategyIndicatorResponse usage = new UserStrategyIndicatorResponse(
                     row.getId(),
@@ -803,11 +881,11 @@ public class UserStrategyServiceImpl implements UserStrategyService {
                 strategy.getTpPct(),
                 indicators,
                 indicatorGroups,
-                fixedParameters.forStrategy(strategy),
+                batch.fixedParameters().forStrategy(strategy),
                 config != null ? config.getId() : null,
                 config != null ? config.getConfigHash() : null,
                 strategy.isDeployable(),
-                subscriptionRepository.countByUserStrategy_Id(strategy.getId()),
+                batch.deploymentsOf(strategy),
                 strategy.isActive(),
                 strategy.getCreatedAt(),
                 strategy.getUpdatedAt());

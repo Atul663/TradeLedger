@@ -940,6 +940,7 @@ GET {{BASE}}/api/v1/my-strategies/grouped?strategyId={{templateId}}   # just tha
     "strategyName": "EMA Averaging",
     "strategyDescription": "EMA of the highs against a shorter signal leg, traded through options or the future, with a configurable averaging ladder.",
     "strategySystem": true,
+    "instanceCount": 4,
     "count": 2,
     "strategies": [
       { "id": "us000000-1111-4222-8333-444444444444",
@@ -950,6 +951,7 @@ GET {{BASE}}/api/v1/my-strategies/grouped?strategyId={{templateId}}   # just tha
     "strategyName": "EMA Crossover",
     "strategyDescription": "Long when the fast leg crosses above the slow leg…",
     "strategySystem": false,
+    "instanceCount": 1,
     "count": 1,
     "strategies": [
       { "id": "us000000-1111-4222-8333-444444444446",
@@ -957,12 +959,21 @@ GET {{BASE}}/api/v1/my-strategies/grouped?strategyId={{templateId}}   # just tha
 ```
 
 Each entry in `strategies[]` is the **same complete `UserStrategyResponse`** the
-flat list returns — grouping changes how the rows are arranged, never what a row
-carries. Groups are ordered by `strategyName` (case-insensitively), rows inside a
-group oldest first, `count` describes the rows actually in the group *after* the
-`active` filter, and a template the caller has built nothing from produces no
-group at all. The name is a **field, not a JSON key**, so rewording a template
-changes a value and never the structure you parse.
+flat list returns — `legs[]`, `indicators[]`, `indicatorGroups[]`,
+`fixedParameters[]`, `configHash`, `deployable`, all of it. One mapper builds both
+shapes, so they cannot drift; grouping changes how the rows are arranged, never
+what a row carries.
+
+The group header carries the template: `strategyName`, `strategyDescription`,
+`strategySystem` (a seeded template is locked, so the logic cannot change under
+you) and `instanceCount` — shared computations for that template across **all**
+users, which is why it may exceed `count`. `count` is only the caller's rows, and
+describes the rows actually in the group *after* the `active` filter.
+
+Groups are ordered by `strategyName` (case-insensitively), rows inside a group
+oldest first, and a template the caller has built nothing from produces no group
+at all. The name is a **field, not a JSON key**, so rewording a template changes a
+value and never the structure you parse.
 
 ### 8.5 The bot shape
 

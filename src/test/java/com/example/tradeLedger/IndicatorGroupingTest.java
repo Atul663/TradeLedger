@@ -9,7 +9,11 @@ import com.example.tradeLedger.entity.User;
 import com.example.tradeLedger.entity.UserStrategy;
 import com.example.tradeLedger.entity.UserStrategyIndicator;
 import com.example.tradeLedger.indicator.IndicatorResolver;
+import com.example.tradeLedger.repository.ExchangeRepository;
+import com.example.tradeLedger.repository.FixedParameterRepository;
 import com.example.tradeLedger.repository.IndicatorRepository;
+import com.example.tradeLedger.repository.SymbolRepository;
+import com.example.tradeLedger.repository.SharedStrategyConfigRepository;
 import com.example.tradeLedger.repository.StrategySubscriptionRepository;
 import com.example.tradeLedger.repository.StrategyTemplateRepository;
 import com.example.tradeLedger.repository.TradingAccountRepository;
@@ -18,6 +22,7 @@ import com.example.tradeLedger.repository.UserStrategyIndicatorRepository;
 import com.example.tradeLedger.repository.UserStrategyRepository;
 import com.example.tradeLedger.service.CurrentUserService;
 import com.example.tradeLedger.service.SharedStrategyConfigService;
+import com.example.tradeLedger.serviceImpl.FixedParameterOptions;
 import com.example.tradeLedger.serviceImpl.IndicatorParams;
 import com.example.tradeLedger.serviceImpl.RuleTrees;
 import com.example.tradeLedger.serviceImpl.StrategyFixedParameters;
@@ -65,6 +70,7 @@ class IndicatorGroupingTest {
             {"period":{"type":"int","min":1,"max":300,"default":21}}""";
 
     private UserStrategyIndicatorRepository indicatorRows;
+    private SharedStrategyConfigRepository sharedConfigs;
     private UserStrategyRepository strategies;
     private UserStrategyServiceImpl service;
     private User user;
@@ -93,9 +99,13 @@ class IndicatorGroupingTest {
                 .thenReturn(java.util.Optional.of(strategy));
 
         indicatorRows = mock(UserStrategyIndicatorRepository.class);
+        sharedConfigs = mock(SharedStrategyConfigRepository.class);
+        when(sharedConfigs.countByStrategyIds(any())).thenReturn(List.of());
 
-        StrategyFixedParameters fixedParameters = mock(StrategyFixedParameters.class);
-        when(fixedParameters.forStrategy(any())).thenReturn(List.of());
+        // A real one over an empty catalog rather than a mock: it is what the
+        // service actually calls, and a stubbed snapshot would only assert that
+        // the stub was wired up.
+        StrategyFixedParameters fixedParameters = emptyFixedParameters();
 
         service = new UserStrategyServiceImpl(
                 currentUser,
@@ -104,6 +114,7 @@ class IndicatorGroupingTest {
                 mock(StrategyTemplateRepository.class),
                 mock(IndicatorRepository.class),
                 mock(StrategySubscriptionRepository.class),
+                sharedConfigs,
                 mock(TradingAccountRepository.class),
                 mock(UserBrokerRepository.class),
                 mock(SharedStrategyConfigService.class),
@@ -114,6 +125,16 @@ class IndicatorGroupingTest {
                 mock(RuleTrees.class),
                 fixedParameters,
                 new JsonSupport(new ObjectMapper()));
+    }
+
+    /** No descriptors, so fixedParameters[] comes back empty and stays out of the way. */
+    static StrategyFixedParameters emptyFixedParameters() {
+        FixedParameterRepository descriptors = mock(FixedParameterRepository.class);
+        when(descriptors.findByActiveOrderByParamGroupAscDisplayOrderAscNameAsc(true))
+                .thenReturn(List.of());
+        return new StrategyFixedParameters(descriptors, new FixedParameterOptions(
+                mock(SymbolRepository.class), mock(ExchangeRepository.class),
+                new JsonSupport(new ObjectMapper())));
     }
 
     private static Indicator indicator(UUID id, String name, String schema) {
@@ -137,8 +158,9 @@ class IndicatorGroupingTest {
         return row;
     }
 
+    /** The batched finder is what a response reads through, however many strategies it covers. */
     private void withRows(UserStrategyIndicator... rows) {
-        when(indicatorRows.findByUserStrategy_IdOrderByDisplayOrderAsc(STRATEGY_ID))
+        when(indicatorRows.findByUserStrategy_IdInOrderByUserStrategy_IdAscDisplayOrderAsc(any()))
                 .thenReturn(List.of(rows));
     }
 

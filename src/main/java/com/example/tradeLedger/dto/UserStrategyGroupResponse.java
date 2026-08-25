@@ -23,8 +23,12 @@ import java.util.UUID;
 @Schema(name = "UserStrategyGroupResponse",
         description = """
                 One template's worth of the caller's strategies. Grouped by strategyId and \
-                tagged with strategyName; the rows inside are the same UserStrategyResponse the \
-                flat list returns.""")
+                tagged with the template's name, description, system flag and instance count.
+
+                The rows inside are the same UserStrategyResponse the flat list returns - the \
+                SAME objects, from the same mapper - so everything a flat row carries is here \
+                too: legs[], indicators[], indicatorGroups[], fixedParameters[], configHash, \
+                deployable. Grouping rearranges rows; it never edits one.""")
 public record UserStrategyGroupResponse(
 
         @Schema(description = "The template every strategy in this group runs.",
@@ -47,6 +51,13 @@ public record UserStrategyGroupResponse(
                 + "active filter has been applied.", example = "2")
         int count,
 
-        @Schema(description = "Oldest first, the same order the flat list uses.")
+        @Schema(description = "How many shared computations exist for this template, across ALL "
+                + "users - the same number the template catalog reports. A platform-wide fact "
+                + "about the template, not a fact about the caller's rows.", example = "4")
+        long instanceCount,
+
+        @Schema(description = "Oldest first, the same order the flat list uses. Each is a "
+                + "COMPLETE UserStrategyResponse - identical, field for field, to what "
+                + "GET /api/v1/my-strategies returns for the same strategy.")
         List<UserStrategyResponse> strategies) {
 }

@@ -6,6 +6,7 @@ import com.example.tradeLedger.entity.StrategyTemplate;
 import com.example.tradeLedger.entity.User;
 import com.example.tradeLedger.entity.UserStrategy;
 import com.example.tradeLedger.repository.IndicatorRepository;
+import com.example.tradeLedger.repository.SharedStrategyConfigRepository;
 import com.example.tradeLedger.repository.StrategySubscriptionRepository;
 import com.example.tradeLedger.repository.StrategyTemplateRepository;
 import com.example.tradeLedger.repository.TradingAccountRepository;
@@ -26,13 +27,18 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.RecordComponent;
 import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -53,6 +59,9 @@ class UserStrategyGroupingTest {
     private static final UUID CROSSOVER_ID = UUID.fromString("8c2d1e0f-7b36-4a15-9e42-0d3c6b5a4f92");
 
     private UserStrategyRepository strategies;
+    private SharedStrategyConfigRepository sharedConfigs;
+    private UserStrategyIndicatorRepository indicatorRows;
+    private StrategySubscriptionRepository subscriptions;
     private UserStrategyServiceImpl service;
     private User user;
 
@@ -65,13 +74,21 @@ class UserStrategyGroupingTest {
         when(currentUser.require(EMAIL)).thenReturn(user);
 
         strategies = mock(UserStrategyRepository.class);
+        sharedConfigs = mock(SharedStrategyConfigRepository.class);
+        when(sharedConfigs.countByStrategyIds(any())).thenReturn(List.of());
+        indicatorRows = mock(UserStrategyIndicatorRepository.class);
+        when(indicatorRows.findByUserStrategy_IdInOrderByUserStrategy_IdAscDisplayOrderAsc(any()))
+                .thenReturn(List.of());
+        subscriptions = mock(StrategySubscriptionRepository.class);
+        when(subscriptions.countByUserStrategyIds(any())).thenReturn(List.of());
         service = new UserStrategyServiceImpl(
                 currentUser,
                 strategies,
-                mock(UserStrategyIndicatorRepository.class),
+                indicatorRows,
                 mock(StrategyTemplateRepository.class),
                 mock(IndicatorRepository.class),
-                mock(StrategySubscriptionRepository.class),
+                subscriptions,
+                sharedConfigs,
                 mock(TradingAccountRepository.class),
                 mock(UserBrokerRepository.class),
                 mock(SharedStrategyConfigService.class),
@@ -80,7 +97,7 @@ class UserStrategyGroupingTest {
                 mock(UserStrategyValidator.class),
                 mock(SymbolResolver.class),
                 mock(RuleTrees.class),
-                mock(StrategyFixedParameters.class),
+                IndicatorGroupingTest.emptyFixedParameters(),
                 new JsonSupport(new ObjectMapper()));
     }
 
@@ -227,6 +244,52 @@ class UserStrategyGroupingTest {
                         "a heading and its rows cannot disagree about the template")));
     }
 
+    /**
+     * The count of shared computations is a fact about the TEMPLATE, across all
+     * users - not about the caller's rows - so it is read from the shared config
+     * table and is free to exceed the group's own count.
+     */
+    @Test
+    void eachGroupCarriesItsTemplatesInstanceCount() {
+        StrategyTemplate averaging = template(AVERAGING_ID, "EMA Averaging");
+        StrategyTemplate crossover = template(CROSSOVER_ID, "EMA Crossover");
+        when(strategies.findByUser_IdOrderByCreatedAtAsc(USER_ID)).thenReturn(List.of(
+                strategy("mine", averaging, true),
+                strategy("also mine", crossover, true)));
+        when(sharedConfigs.countByStrategyIds(any())).thenReturn(
+                List.<Object[]>of(new Object[]{AVERAGING_ID, 4L}));
+
+        List<UserStrategyGroupResponse> groups = service.listGrouped(EMAIL, null, null);
+
+        assertEquals(4L, groups.get(0).instanceCount(),
+                "more computations than the caller has strategies - other users share it");
+        assertEquals(1, groups.get(0).count());
+        assertEquals(0L, groups.get(1).instanceCount(),
+                "a template no computation exists for is absent from the GROUP BY, not null");
+    }
+
+    /**
+     * The whole point of batching: a list response asks each question ONCE,
+     * however many strategies it covers. Asking per row is a database round trip
+     * per row, which is what made this endpoint slow.
+     */
+    @Test
+    void aListAsksForIndicatorsAndCountsOncePerRequestNotOncePerStrategy() {
+        StrategyTemplate averaging = template(AVERAGING_ID, "EMA Averaging");
+        when(strategies.findByUser_IdOrderByCreatedAtAsc(USER_ID)).thenReturn(List.of(
+                strategy("one", averaging, true),
+                strategy("two", averaging, true),
+                strategy("three", averaging, true)));
+
+        service.listGrouped(EMAIL, null, null);
+
+        verify(indicatorRows, times(1))
+                .findByUserStrategy_IdInOrderByUserStrategy_IdAscDisplayOrderAsc(any());
+        verify(subscriptions, times(1)).countByUserStrategyIds(any());
+        verify(sharedConfigs, times(1)).countByStrategyIds(any());
+        verify(indicatorRows, never()).findByUserStrategy_IdOrderByDisplayOrderAsc(any());
+    }
+
     @Test
     void aUserWithNoStrategiesGetsNoGroups() {
         when(strategies.findByUser_IdOrderByCreatedAtAsc(USER_ID)).thenReturn(List.of());
@@ -246,12 +309,44 @@ class UserStrategyGroupingTest {
                 strategy("c", averaging, true)));
 
         List<UserStrategyResponse> flat = service.list(EMAIL, null, null);
-        List<UUID> grouped = service.listGrouped(EMAIL, null, null).stream()
+        List<UserStrategyResponse> grouped = service.listGrouped(EMAIL, null, null).stream()
                 .flatMap(group -> group.strategies().stream())
-                .map(UserStrategyResponse::id)
                 .toList();
 
+        // WHOLE rows, not their ids. Comparing ids would pass while the grouped
+        // shape quietly dropped a field, and every field added to the flat
+        // response since has had to be added to this one too - the point of the
+        // assertion is that it CANNOT be forgotten. UserStrategyResponse is a
+        // record, so this compares every component, including indicatorGroups
+        // and fixedParameters.
         assertEquals(flat.size(), grouped.size());
-        assertTrue(grouped.containsAll(flat.stream().map(UserStrategyResponse::id).toList()));
+        assertTrue(grouped.containsAll(flat),
+                "a row must be byte-identical in both shapes - grouping rearranges, never edits");
+    }
+
+    /**
+     * The same guarantee stated the other way: the two shapes are built by ONE
+     * mapper, so a field cannot exist on the flat row and be missing from the
+     * grouped one. If this ever fails, someone has forked the mapping.
+     */
+    @Test
+    void aGroupedRowCarriesEveryFieldTheFlatRowDoes() {
+        StrategyTemplate averaging = template(AVERAGING_ID, "EMA Averaging");
+        when(strategies.findByUser_IdOrderByCreatedAtAsc(USER_ID))
+                .thenReturn(List.of(strategy("only", averaging, true)));
+
+        UserStrategyResponse flat = service.list(EMAIL, null, null).get(0);
+        UserStrategyResponse grouped = service.listGrouped(EMAIL, null, null)
+                .get(0).strategies().get(0);
+
+        for (RecordComponent component : UserStrategyResponse.class.getRecordComponents()) {
+            try {
+                assertEquals(component.getAccessor().invoke(flat),
+                        component.getAccessor().invoke(grouped),
+                        "grouped row differs on " + component.getName());
+            } catch (ReflectiveOperationException e) {
+                throw new AssertionError("could not read " + component.getName(), e);
+            }
+        }
     }
 }

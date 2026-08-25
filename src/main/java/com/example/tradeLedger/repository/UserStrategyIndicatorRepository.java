@@ -3,6 +3,7 @@ package com.example.tradeLedger.repository;
 import com.example.tradeLedger.entity.UserStrategyIndicator;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -10,6 +11,16 @@ import java.util.UUID;
 public interface UserStrategyIndicatorRepository extends JpaRepository<UserStrategyIndicator, UUID> {
 
     List<UserStrategyIndicator> findByUserStrategy_IdOrderByDisplayOrderAsc(UUID userStrategyId);
+
+    /**
+     * The same rows for MANY strategies at once - one query for a whole list
+     * response instead of one per strategy.
+     *
+     * Ordered by owning strategy first so a caller can group the result without a
+     * second sort, then by the display order each strategy's rows are read in.
+     */
+    List<UserStrategyIndicator> findByUserStrategy_IdInOrderByUserStrategy_IdAscDisplayOrderAsc(
+            Collection<UUID> userStrategyIds);
 
     /** Ownership-scoped: an indicator row is only addressable through its own user strategy. */
     Optional<UserStrategyIndicator> findByIdAndUserStrategy_Id(UUID id, UUID userStrategyId);
