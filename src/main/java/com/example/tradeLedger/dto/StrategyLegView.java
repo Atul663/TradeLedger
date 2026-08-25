@@ -17,15 +17,15 @@ import io.swagger.v3.oas.annotations.media.Schema;
                 + "Read-only; writes address ceMoneyness / ceStrikeOffset and their pe twins.")
 public record StrategyLegView(
 
-        @Schema(description = "Which side. FUT appears alone, on a futures strategy.",
-                example = "CE", allowableValues = {"CE", "PE", "FUT"})
+        @Schema(description = "Which side. FUTURES appears alone, on a futures strategy.",
+                example = "CE", allowableValues = {"CE", "PE", "FUTURES"})
         String side,
 
-        @Schema(description = "Null on a FUT leg - a future has no strike.",
+        @Schema(description = "Null on a FUTURES leg - a future has no strike.",
                 example = "OTM", allowableValues = {"ATM", "ITM", "OTM"})
         String moneyness,
 
-        @Schema(description = "0 for ATM and FUT, 1..15 for ITM and OTM.", example = "1")
+        @Schema(description = "0 for ATM and FUTURES, 1..15 for ITM and OTM.", example = "1")
         int strikeOffset,
 
         @Schema(description = "Ready to print.", example = "CE OTM1")

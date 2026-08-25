@@ -96,6 +96,51 @@ class SwaggerExamplesTest {
     }
 
     /**
+     * The RESPONSE examples too - the "Example Value" under a 200.
+     *
+     * These are the ones a client copies to build a fixture, and an array example
+     * has more brackets to get wrong than a request body does. Nothing type-checks
+     * them either, and unlike a request example a broken one is not discovered by
+     * anyone pasting it into Try It Out.
+     */
+    @Test
+    void everyResponseExampleIsValidJson() {
+        List<String> failures = new ArrayList<>();
+        int checked = 0;
+
+        for (Class<?> controller : CONTROLLERS) {
+            for (Method method : controller.getDeclaredMethods()) {
+                io.swagger.v3.oas.annotations.Operation operation =
+                        method.getAnnotation(io.swagger.v3.oas.annotations.Operation.class);
+                if (operation == null) {
+                    continue;
+                }
+                for (io.swagger.v3.oas.annotations.responses.ApiResponse response : operation.responses()) {
+                    for (io.swagger.v3.oas.annotations.media.Content content : response.content()) {
+                        for (ExampleObject example : content.examples()) {
+                            checked++;
+                            String where = controller.getSimpleName() + "." + method.getName()
+                                    + " response '" + example.name() + "'";
+                            try {
+                                JsonNode parsed = MAPPER.readTree(example.value());
+                                if (!parsed.isObject() && !parsed.isArray()) {
+                                    failures.add(where + " is neither a JSON object nor an array");
+                                }
+                            } catch (Exception e) {
+                                failures.add(where + " is not valid JSON: " + e.getMessage());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        assertTrue(failures.isEmpty(), String.join("\n", failures));
+        assertTrue(checked >= 2,
+                "expected the documented response examples to still be here, found " + checked);
+    }
+
+    /**
      * A {@code $key} in a rule-tree example is a binding, not a template
      * placeholder - a build step that interpolated it away would leave an example
      * that looks fine and does nothing.

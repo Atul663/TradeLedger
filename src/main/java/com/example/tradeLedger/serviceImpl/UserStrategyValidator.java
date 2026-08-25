@@ -21,7 +21,7 @@ import java.util.Locale;
  * entity mean a strike depth cannot disagree with its moneyness however the row
  * is written. This layer exists to catch the same mistakes one request earlier
  * and say something useful about them, and to enforce the cross-column rules a
- * CHECK cannot express as readably: a FUT strategy having no option side, an
+ * CHECK cannot express as readably: a FUTURES strategy having no option side, an
  * OPTION strategy having at least one.
  *
  * Every method collects errors rather than throwing on the first, so a form with
@@ -68,9 +68,9 @@ public class UserStrategyValidator {
     }
 
     private void validateInstrument(UserStrategy strategy, List<String> errors) {
-        if (strategy.getDerivative() == Derivative.FUT) {
+        if (strategy.getDerivative() == Derivative.FUTURES) {
             if (strategy.isCeEnabled() || strategy.isPeEnabled()) {
-                errors.add("derivative is FUT, so no CE or PE side applies - "
+                errors.add("derivative is FUTURES, so no CE or PE side applies - "
                         + "turn them off, or set derivative to OPTION");
             }
             return;
@@ -154,8 +154,11 @@ public class UserStrategyValidator {
      */
     public List<StrategyLegView> legs(UserStrategy strategy) {
         List<StrategyLegView> legs = new ArrayList<>(2);
-        if (strategy.getDerivative() == Derivative.FUT) {
-            legs.add(new StrategyLegView("FUT", null, 0, "FUT"));
+        if (strategy.getDerivative() == Derivative.FUTURES) {
+            // Off the enum, not a literal, so the leg and the derivative field can
+            // never end up spelling the same thing two ways.
+            String side = Derivative.FUTURES.name();
+            legs.add(new StrategyLegView(side, null, 0, side));
             return legs;
         }
         if (strategy.isCeEnabled()) {

@@ -68,9 +68,9 @@ public class UserStrategyRequest {
 
     // -------------------------------------------------------- the instrument
 
-    @Schema(description = "What the signal is traded through. FUT means no strike to choose "
+    @Schema(description = "What the signal is traded through. FUTURES means no strike to choose "
             + "and both option sides must stay off.",
-            example = "OPTION", allowableValues = {"FUT", "OPTION"}, defaultValue = "OPTION")
+            example = "OPTION", allowableValues = {"FUTURES", "OPTION"}, defaultValue = "OPTION")
     private String derivative;
 
     @Schema(description = "Trade the call side. Setting ceMoneyness turns this on by itself.",

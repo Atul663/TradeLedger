@@ -5,9 +5,11 @@ import com.example.tradeLedger.dto.FixedParameterRequest;
 import com.example.tradeLedger.dto.FixedParameterResponse;
 import com.example.tradeLedger.service.FixedParameterService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,7 +51,44 @@ public class FixedParameterController extends SecuredController {
     @Operation(summary = "List fixed parameters, ordered the way a form lays them out",
             description = "By group, then position within it, then name. Filter by `group` to "
                     + "render one section, by `scope` to separate what changes the signal from "
-                    + "what only changes execution, and by `active` to hide retired knobs.")
+                    + "what only changes execution, and by `active` to hide retired knobs.\n\n"
+                    + "**A `symbol` knob comes back with its options filled in**, from the "
+                    + "active `symbols` - here, and on every other read below. Nothing is "
+                    + "stored for it, so a newly listed instrument appears without a deploy.",
+            responses = @ApiResponse(responseCode = "200",
+                    content = @Content(mediaType = "application/json",
+                            array = @ArraySchema(schema = @Schema(implementation = FixedParameterResponse.class)),
+                            examples = @ExampleObject(name = "The Market section",
+                                    description = "symbol carries the live ticker list; the "
+                                            + "timeframe knobs carry the bounds they were "
+                                            + "authored with.",
+                                    value = """
+                                            [ { "id": "310a6c6a-6bb4-452d-87e2-0748a7f57abf",
+                                                "name": "symbol",
+                                                "label": "Underlying",
+                                                "description": "The instrument the strategy trades.",
+                                                "dataType": "symbol",
+                                                "scope": "signal",
+                                                "defaultValue": null,
+                                                "validation": { "options": ["BANK NIFTY", "NIFTY"],
+                                                                "optionsSource": "/api/v1/symbols" },
+                                                "paramGroup": "Market",
+                                                "displayOrder": 0,
+                                                "required": true,
+                                                "active": true,
+                                                "createdAt": "2026-08-25T08:46:54.467+05:30",
+                                                "updatedAt": "2026-08-25T08:46:54.467+05:30" },
+                                              { "id": "a6980a20-ccaf-47ae-b1d5-7d9c065f42be",
+                                                "name": "candleDuration",
+                                                "label": "Time frame",
+                                                "dataType": "timeframe",
+                                                "scope": "signal",
+                                                "defaultValue": "5m",
+                                                "validation": {},
+                                                "paramGroup": "Market",
+                                                "displayOrder": 1,
+                                                "required": true,
+                                                "active": true } ]"""))))
     public List<FixedParameterResponse> list(@RequestParam(required = false) String group,
                                              @RequestParam(required = false) String scope,
                                              @RequestParam(required = false) Boolean active) {
@@ -65,7 +104,28 @@ public class FixedParameterController extends SecuredController {
                     + "inside a group by position then name, and the same `group`, `scope` and "
                     + "`active` filters apply - `group` narrows it to that one group. "
                     + "Descriptors with no group collect in a single entry whose `paramGroup` "
-                    + "is null.")
+                    + "is null. A `symbol` knob carries its live options here too.",
+            responses = @ApiResponse(responseCode = "200",
+                    content = @Content(mediaType = "application/json",
+                            array = @ArraySchema(schema = @Schema(implementation = FixedParameterGroupResponse.class)),
+                            examples = @ExampleObject(name = "Sections, symbol first",
+                                    value = """
+                                            [ { "paramGroup": "Market",
+                                                "count": 3,
+                                                "parameters": [
+                                                  { "name": "symbol", "label": "Underlying",
+                                                    "dataType": "symbol", "scope": "signal",
+                                                    "defaultValue": null,
+                                                    "validation": { "options": ["BANK NIFTY", "NIFTY"],
+                                                                    "optionsSource": "/api/v1/symbols" },
+                                                    "paramGroup": "Market", "displayOrder": 0,
+                                                    "required": true, "active": true },
+                                                  { "name": "candleDuration", "label": "Time frame",
+                                                    "dataType": "timeframe", "scope": "signal",
+                                                    "defaultValue": "5m", "validation": {},
+                                                    "paramGroup": "Market", "displayOrder": 1,
+                                                    "required": true, "active": true } ] },
+                                              { "paramGroup": "Exits", "count": 2, "parameters": [] } ]"""))))
     public List<FixedParameterGroupResponse> listGrouped(@RequestParam(required = false) String group,
                                                          @RequestParam(required = false) String scope,
                                                          @RequestParam(required = false) Boolean active) {
@@ -139,6 +199,20 @@ public class FixedParameterController extends SecuredController {
                                               "defaultValue": "5m",
                                               "paramGroup": "Market",
                                               "displayOrder": 2,
+                                              "required": true }"""),
+                            @ExampleObject(name = "A choice whose options are rows",
+                                    description = "A symbol knob declares no options - they are "
+                                            + "the active symbols and are filled in from the "
+                                            + "table on every read. Sending validation.options "
+                                            + "here is a 400.",
+                                    value = """
+                                            { "name": "symbol",
+                                              "label": "Underlying",
+                                              "description": "The instrument the strategy trades.",
+                                              "dataType": "symbol",
+                                              "scope": "signal",
+                                              "paramGroup": "Market",
+                                              "displayOrder": 0,
                                               "required": true }"""),
                             @ExampleObject(name = "A whole number with a floor and a ceiling",
                                     value = """

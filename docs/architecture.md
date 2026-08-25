@@ -293,7 +293,7 @@ UNIQUE `(user_id, name)`. **This is the centre of the model.**
 | `name`, `description` | The user's own label and note |
 | `candle_duration` | `5m` — the candle evaluated on. Part of the shared config's identity |
 | `trigger_duration` | How often to re-check inside that candle. Never hashed |
-| `derivative` | `FUT` \| `OPTION` |
+| `derivative` | `FUTURES` \| `OPTION` |
 | `ce_enabled`, `ce_moneyness`, `ce_strike_offset` | The call side: on/off, `ATM`/`ITM`/`OTM`, depth 0–15 |
 | `pe_enabled`, `pe_moneyness`, `pe_strike_offset` | The put side, chosen **independently** of the call |
 | `lot_rule` | `FIXED` \| `DOUBLE` \| `CUMULATIVE` |
@@ -483,7 +483,7 @@ Every other endpoint expects `Authorization: Bearer <accessToken>`.
         │  indicator params MERGED over what is stored, then validated
         ▼
  UserStrategyValidator.validate()
-        │  FUT  → neither option side may be on
+        │  FUTURES  → neither option side may be on
         │  OPTION → at least one side, each with a moneyness
         │  ATM → offset 0;  ITM/OTM → 1..15
         │  base_lot ≥ 1;  averaging_count 0..10
@@ -581,7 +581,7 @@ unordered map would split the dedup silently.
 
 The CHECK constraints already make an impossible strike impossible. This layer
 catches the same mistakes one request earlier with a message worth reading, and
-enforces what a CHECK cannot state readably: a FUT strategy with an option side
+enforces what a CHECK cannot state readably: a FUTURES strategy with an option side
 still on, an OPTION strategy with neither. It collects every error rather than
 throwing on the first.
 

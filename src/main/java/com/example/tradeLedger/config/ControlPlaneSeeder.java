@@ -230,7 +230,7 @@ public class ControlPlaneSeeder implements ApplicationRunner {
         seedFixedParameter(GROUP_INSTRUMENT, 1, "derivative", "Derivative",
                 FixedParameter.TYPE_ENUM, FixedParameter.SCOPE_EXECUTION, "OPTION",
                 """
-                        {"options":["FUT","OPTION"]}""", true,
+                        {"options":["FUTURES","OPTION"]}""", true,
                 "Whether the signal is traded through the future or through options. The CE and "
                         + "PE sides apply only to OPTION.");
         seedFixedParameter(GROUP_INSTRUMENT, 2, "ceEnabled", "CALL (CE)",

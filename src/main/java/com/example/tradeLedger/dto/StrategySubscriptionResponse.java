@@ -55,7 +55,7 @@ public record StrategySubscriptionResponse(
         @Schema(example = "5m")
         String candleDuration,
 
-        @Schema(example = "OPTION", allowableValues = {"FUT", "OPTION"})
+        @Schema(example = "OPTION", allowableValues = {"FUTURES", "OPTION"})
         String derivative,
 
         @Schema(description = "What this deployment actually trades, derived from the strategy.")

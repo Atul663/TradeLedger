@@ -10,7 +10,7 @@ package com.example.tradeLedger.entity;
 public enum Derivative {
 
     /** The future. One position, no strike to choose - the sheet's "NA" row. */
-    FUT,
+    FUTURES,
 
     /** Options: a call, a put, or both, each picking its own strike. */
     OPTION

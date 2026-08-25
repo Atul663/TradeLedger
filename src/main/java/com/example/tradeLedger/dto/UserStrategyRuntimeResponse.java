@@ -57,7 +57,7 @@ public record UserStrategyRuntimeResponse(
 
         List<Indicator> indicators,
 
-        @Schema(example = "OPTION", allowableValues = {"FUT", "OPTION"})
+        @Schema(example = "OPTION", allowableValues = {"FUTURES", "OPTION"})
         String derivative,
 
         @Schema(description = "What to trade when the signal fires, in the order to place it.")

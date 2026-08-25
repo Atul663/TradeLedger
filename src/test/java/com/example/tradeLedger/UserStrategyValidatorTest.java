@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The cross-column rules a CHECK constraint cannot state readably: a FUT strategy
+ * The cross-column rules a CHECK constraint cannot state readably: a FUTURES strategy
  * with no option side, an OPTION strategy with at least one, and a strike depth
  * that agrees with its moneyness.
  */
@@ -51,10 +51,10 @@ class UserStrategyValidatorTest {
     @Test
     void describesAFutureAsASingleLegWithNoStrike() {
         UserStrategy strategy = new UserStrategy();
-        strategy.setDerivative(Derivative.FUT);
+        strategy.setDerivative(Derivative.FUTURES);
         validator.validate(strategy);
 
-        assertEquals(List.of("FUT"), validator.legs(strategy).stream().map(StrategyLegView::label).toList());
+        assertEquals(List.of("FUTURES"), validator.legs(strategy).stream().map(StrategyLegView::label).toList());
     }
 
     @Test
@@ -70,11 +70,11 @@ class UserStrategyValidatorTest {
     @Test
     void rejectsAFutureStrategyThatStillCarriesAnOptionSide() {
         UserStrategy strategy = bothSides();
-        strategy.setDerivative(Derivative.FUT);
+        strategy.setDerivative(Derivative.FUTURES);
 
         StrategyValidationException thrown =
                 assertThrows(StrategyValidationException.class, () -> validator.validate(strategy));
-        assertTrue(thrown.getMessage().contains("FUT"), thrown.getMessage());
+        assertTrue(thrown.getMessage().contains("FUTURES"), thrown.getMessage());
     }
 
     /** There is exactly one at-the-money strike, so OTM0 is not a way to spell it. */

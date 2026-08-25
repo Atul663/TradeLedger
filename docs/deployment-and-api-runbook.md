@@ -810,7 +810,7 @@ Authorization: Bearer {{TOKEN}}
 | `symbolId` **or** `symbol` + `exchangeCode` | | `null` | needed before deploying |
 | `candleDuration` | string | `null` | `^[0-9]{1,4}[smhdw]$`; needed before deploying; **hashed** |
 | `triggerDuration` | string | `null` | same format; never hashed |
-| `derivative` | enum | `OPTION` | `FUT` \| `OPTION` |
+| `derivative` | enum | `OPTION` | `FUTURES` \| `OPTION` |
 | `ceEnabled` | bool | `false` | **setting `ceMoneyness` turns it on** |
 | `ceMoneyness` | enum | `null` | `ATM` \| `ITM` \| `OTM` |
 | `ceStrikeOffset` | int | `0` | `0` for ATM; `1..15` for ITM/OTM |
@@ -889,14 +889,14 @@ Enums parse case-insensitively (`"otm"` works), but send the canonical form.
 Notes for the UI:
 
 - the `ce*` / `pe*` fields are the **editable** form — same names as the request;
-- `legs[]` is the same choice **derived** for display (read-only). For a `FUT`
-  strategy it is a single `[{"side":"FUT","moneyness":null,"strikeOffset":0,"label":"FUT"}]`;
+- `legs[]` is the same choice **derived** for display (read-only). For a `FUTURES`
+  strategy it is a single `[{"side":"FUTURES","moneyness":null,"strikeOffset":0,"label":"FUTURES"}]`;
 - `params` comes back **sorted** (`d` before `k`) — that is the canonical order
   the hash is computed over, not a display order;
 - `deployable` gates the deploy button; `deploymentCount` tells the user how many
   brokers an edit will move.
 
-### 8.3 The FUT variant
+### 8.3 The FUTURES variant
 
 ```http
 POST {{BASE}}/api/v1/my-strategies
@@ -904,14 +904,14 @@ POST {{BASE}}/api/v1/my-strategies
   "name": "NIFTY futures 50/21",
   "symbol": "NIFTY", "exchangeCode": "NSE",
   "candleDuration": "5m",
-  "derivative": "FUT",
+  "derivative": "FUTURES",
   "lotRule": "FIXED", "baseLot": 75,
   "indicators": [ { "indicatorName": "EMA Averaging",
                     "params": { "k": 50, "d": 21 } } ] }
 ```
 
-`ceEnabled` / `peEnabled` must stay off — `FUT` has no strike to choose.
-`legs` comes back as `[{"side":"FUT","label":"FUT"}]`.
+`ceEnabled` / `peEnabled` must stay off — `FUTURES` has no strike to choose.
+`legs` comes back as `[{"side":"FUTURES","label":"FUTURES"}]`.
 
 ### 8.4 Read
 
@@ -1271,7 +1271,7 @@ Every error body has `error` (a displayable sentence). `400` **also** has
 | Cause | Message |
 |---|---|
 | OPTION, neither side on | `derivative is OPTION but neither side is on - enable ceEnabled, peEnabled, or both` |
-| FUT, a side still on | `derivative is FUT, so no CE or PE side applies - turn them off, or set derivative to OPTION` |
+| FUTURES, a side still on | `derivative is FUTURES, so no CE or PE side applies - turn them off, or set derivative to OPTION` |
 | side on, no moneyness | `ceMoneyness is required while ceEnabled is true (ATM, ITM or OTM)` |
 | depth on ATM | `ceStrikeOffset must be 0 for ATM - there is one at-the-money strike; use ITM or OTM to move 3 strike(s) away` |
 | depth out of range | `ceStrikeOffset must be 1..15 for OTM, got 16` |

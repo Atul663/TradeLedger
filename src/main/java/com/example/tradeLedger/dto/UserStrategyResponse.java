@@ -80,7 +80,7 @@ public record UserStrategyResponse(
 
         // --------------------------------------------------------- instrument
 
-        @Schema(example = "OPTION", allowableValues = {"FUT", "OPTION"})
+        @Schema(example = "OPTION", allowableValues = {"FUTURES", "OPTION"})
         String derivative,
 
         @Schema(example = "true")
@@ -102,8 +102,8 @@ public record UserStrategyResponse(
         int peStrikeOffset,
 
         @Schema(description = "The same instrument choice, derived: what this strategy actually "
-                + "trades. Read-only - writes address the ce*/pe* fields by name. A FUT strategy "
-                + "returns a single FUT leg.")
+                + "trades. Read-only - writes address the ce*/pe* fields by name. A FUTURES strategy "
+                + "returns a single FUTURES leg.")
         List<StrategyLegView> legs,
 
         // ------------------------------------------------------------- sizing

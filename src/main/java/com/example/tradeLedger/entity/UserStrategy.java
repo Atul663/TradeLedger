@@ -123,7 +123,7 @@ public class UserStrategy {
 
     // -------------------------------------------------------- the instrument
 
-    /** FUT | OPTION. Decides whether the CE and PE sides apply at all. */
+    /** FUTURES | OPTION. Decides whether the CE and PE sides apply at all. */
     @Enumerated(EnumType.STRING)
     @Column(name = "derivative", nullable = false, length = 10)
     private Derivative derivative = Derivative.OPTION;
@@ -230,7 +230,7 @@ public class UserStrategy {
         return symbol != null && candleDuration != null && sharedConfig != null;
     }
 
-    /** "CE OTM3", "PE ATM", "FUT" - built the same way wherever a leg is shown. */
+    /** "CE OTM3", "PE ATM", "FUTURES" - built the same way wherever a leg is shown. */
     public static String legLabel(String side, Moneyness moneyness, int strikeOffset) {
         if (moneyness == null) {
             return side;

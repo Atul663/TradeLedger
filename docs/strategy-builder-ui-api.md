@@ -47,7 +47,7 @@ values on the same symbol and candle share one computation, whatever else differ
 | | Where it comes from | Changes per template? |
 |---|---|---|
 | Symbol, candle, trigger duration | fixed columns | no |
-| FUT/OPTION, CE & PE strikes | fixed columns | no |
+| FUTURES/OPTION, CE & PE strikes | fixed columns | no |
 | Lot rule, base lot, averaging count | fixed columns | no |
 | SL %, TP % | fixed columns | no |
 | **Indicator values (k, d, period…)** | `indicators[].paramSchema` | **yes** |
@@ -114,7 +114,7 @@ match the request field names, so matching on them to place an inline error work
 Hardcode these. They are Java enums and database CHECK constraints.
 
 ```ts
-type Derivative    = 'FUT' | 'OPTION';
+type Derivative    = 'FUTURES' | 'OPTION';
 type Moneyness     = 'ATM' | 'ITM' | 'OTM';
 type LotRule       = 'FIXED' | 'DOUBLE' | 'CUMULATIVE';
 type TradeMode     = 'paper' | 'live';
@@ -375,7 +375,7 @@ Two views of the same choice, on purpose:
   so a round trip is edit-one-field-and-PUT-it-back;
 - `legs[]` is the same thing **derived for display** — iterate it for a summary
   line without reimplementing "CE OTM1" from three fields. It is read-only, and
-  for a `FUT` strategy it is a single `{"side":"FUT","label":"FUT"}`.
+  for a `FUTURES` strategy it is a single `{"side":"FUTURES","label":"FUTURES"}`.
 
 `deployable` is false until symbol and candle are set — use it to gate the deploy
 button. `deploymentCount` tells the user how many brokers an edit will move.
@@ -503,7 +503,7 @@ them saves a round trip.
 | Rule | Message shape |
 |---|---|
 | OPTION with neither side on | `derivative is OPTION but neither side is on…` |
-| FUT with a side still on | `derivative is FUT, so no CE or PE side applies…` |
+| FUTURES with a side still on | `derivative is FUTURES, so no CE or PE side applies…` |
 | Side on with no moneyness | `ceMoneyness is required while ceEnabled is true…` |
 | Depth on ATM | `ceStrikeOffset must be 0 for ATM…` |
 | Depth out of range | `ceStrikeOffset must be 1..15 for OTM, got 16` |

@@ -163,7 +163,7 @@ public class UserStrategyController extends SecuredController {
                                               "symbol": "NIFTY",
                                               "exchangeCode": "NSE",
                                               "candleDuration": "5m",
-                                              "derivative": "FUT",
+                                              "derivative": "FUTURES",
                                               "lotRule": "FIXED",
                                               "baseLot": 75,
                                               "indicators": [
