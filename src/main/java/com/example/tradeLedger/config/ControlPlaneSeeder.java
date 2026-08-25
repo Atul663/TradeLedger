@@ -210,19 +210,28 @@ public class ControlPlaneSeeder implements ApplicationRunner {
      */
     private void seedFixedParameters() {
         // No stored options and none possible: the choices are the rows of
-        // `symbols`, and a copy here would be stale the next time an instrument is
-        // listed. FixedParameterOptions fills them from the table on read.
-        seedFixedParameter(GROUP_MARKET, 0, "symbol", "Underlying",
+        // `exchanges` and `symbols`, and a copy here would be stale the next time a
+        // venue or an instrument is listed. FixedParameterOptions fills them from
+        // the table on read.
+        //
+        // The venue comes first because it NARROWS the instrument: a ticker is
+        // unique per exchange, so 'NSE' + 'NIFTY' is the pair that identifies one.
+        seedFixedParameter(GROUP_MARKET, 0, "exchangeCode", "Exchange",
+                FixedParameter.TYPE_EXCHANGE, FixedParameter.SCOPE_SIGNAL, null, null, true,
+                "The venue the instrument is listed on. Sent alongside symbol to identify it - "
+                        + "a ticker is unique per exchange, not globally. Not needed when "
+                        + "symbolId is sent instead.");
+        seedFixedParameter(GROUP_MARKET, 1, "symbol", "Underlying",
                 FixedParameter.TYPE_SYMBOL, FixedParameter.SCOPE_SIGNAL, null, null, true,
                 "The instrument the strategy trades. Part of the shared config's identity, so "
                         + "two users on different underlyings cannot share one computation. "
                         + "Tickers are unique per exchange, not globally - send exchangeCode "
                         + "alongside it, or send symbolId instead.");
-        seedFixedParameter(GROUP_MARKET, 1, "candleDuration", "Time frame",
+        seedFixedParameter(GROUP_MARKET, 2, "candleDuration", "Time frame",
                 FixedParameter.TYPE_TIMEFRAME, FixedParameter.SCOPE_SIGNAL, "5m", null, true,
                 "The candle the strategy evaluates on. Part of the shared config's identity, "
                         + "so two users on different candles cannot share one computation.");
-        seedFixedParameter(GROUP_MARKET, 2, "triggerDuration", "Trigger interval",
+        seedFixedParameter(GROUP_MARKET, 3, "triggerDuration", "Trigger interval",
                 FixedParameter.TYPE_TIMEFRAME, FixedParameter.SCOPE_EXECUTION, "1m", null, false,
                 "How often the entry condition is re-checked inside a candle. It changes when "
                         + "you look, not what is computed.");

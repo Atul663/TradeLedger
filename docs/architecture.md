@@ -226,10 +226,10 @@ column** on `user_strategies` or `user_strategy_subscriptions`.
 | `name` | `slPct`, `baseLot`, `candleDuration`. UNIQUE case-insensitively. By convention **the API field name of the column it describes**, so a form binds the two by string equality |
 | `label` | `SL %` |
 | `description` | Help text |
-| `data_type` | `int · decimal · bool · enum · timeframe · text · symbol` |
+| `data_type` | `int · decimal · bool · enum · timeframe · text · symbol · exchange` |
 | `scope` | `signal` / `execution` — whether the knob is part of a strategy's shared identity |
 | `default_value` | text, coerced by `data_type`. What a form **pre-fills**, not what the engine applies |
-| `validation` | jsonb. `{"min":0,"max":100}`, or `{"options":[...]}` which an `enum` requires. Mirrors the CHECK constraint on the column. **Empty for a `symbol` knob** — see below |
+| `validation` | jsonb. `{"min":0,"max":100}`, or `{"options":[...]}` which an `enum` requires. Mirrors the CHECK constraint on the column. **Empty for a `symbol` / `exchange` knob** — see below |
 | `param_group`, `display_order` | Which section of the form, and where in it |
 | `is_required`, `is_active` | Whether a form must demand it; whether it is shown at all |
 
@@ -246,7 +246,7 @@ absence is asserted rather than left to review.
 default goes through the same `Timeframes` normalizer a strategy's does, so `5M`
 stores as `5m`.
 
-#### `symbol` — the one knob whose choices are rows
+#### `symbol` and `exchange` — the knobs whose choices are rows
 
 `symbol` is a choice like `enum`, but its options are the active `symbols`, not a
 vocabulary anyone authored. That is why it is a **type of its own** rather than an
@@ -265,6 +265,25 @@ Tickers rather than ids, because `symbol` is the field a PUT carries. A ticker i
 unique **per exchange**, not globally, so one listed on two venues is offered once
 and `exchangeCode` alongside it picks the venue — the same pair `SymbolResolver`
 has always required. `symbolId` remains the unambiguous alternative.
+
+`exchange` is the same mechanism over the active `exchanges`, and it is what makes
+the symbol knob's output submittable — a form can offer the venue beside the
+ticker instead of the client knowing to append one:
+
+```json
+"validation": { "options": ["BSE", "NSE"],
+                "optionsSource": "/api/v1/exchanges" }
+```
+
+Codes rather than names or ids, for the same reason: `exchangeCode` is the field a
+PUT carries. A `disabled` exchange is left out — `SymbolResolver` would refuse a
+symbol on one anyway, so offering it would be offering a choice that cannot be
+saved. The knob sits at `displayOrder 0`, **before** `symbol`, because the venue
+narrows the instrument.
+
+`FixedParameter.REFERENCE_TYPES` is the set both belong to; the write rule that
+refuses authored options and the read path that fills them both key off it, so a
+third reference knob is one entry plus one lookup.
 
 ### `strategy_templates` — the logic (`StrategyTemplate.java`)
 

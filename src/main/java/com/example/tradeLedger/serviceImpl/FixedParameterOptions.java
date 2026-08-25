@@ -1,7 +1,9 @@
 package com.example.tradeLedger.serviceImpl;
 
 import com.example.tradeLedger.entity.FixedParameter;
+import com.example.tradeLedger.entity.Exchange;
 import com.example.tradeLedger.entity.Symbol;
+import com.example.tradeLedger.repository.ExchangeRepository;
 import com.example.tradeLedger.repository.SymbolRepository;
 import com.example.tradeLedger.utils.JsonSupport;
 import org.springframework.stereotype.Component;
@@ -42,12 +44,17 @@ public class FixedParameterOptions {
     public static final String KEY_OPTIONS_SOURCE = "optionsSource";
 
     private static final String SYMBOLS_SOURCE = "/api/v1/symbols";
+    private static final String EXCHANGES_SOURCE = "/api/v1/exchanges";
 
     private final SymbolRepository symbolRepository;
+    private final ExchangeRepository exchangeRepository;
     private final JsonSupport json;
 
-    public FixedParameterOptions(SymbolRepository symbolRepository, JsonSupport json) {
+    public FixedParameterOptions(SymbolRepository symbolRepository,
+                                 ExchangeRepository exchangeRepository,
+                                 JsonSupport json) {
         this.symbolRepository = symbolRepository;
+        this.exchangeRepository = exchangeRepository;
         this.json = json;
     }
 
@@ -62,6 +69,9 @@ public class FixedParameterOptions {
         if (FixedParameter.TYPE_SYMBOL.equals(parameter.getDataType())) {
             rules.put(KEY_OPTIONS, symbolOptions());
             rules.put(KEY_OPTIONS_SOURCE, SYMBOLS_SOURCE);
+        } else if (FixedParameter.TYPE_EXCHANGE.equals(parameter.getDataType())) {
+            rules.put(KEY_OPTIONS, exchangeOptions());
+            rules.put(KEY_OPTIONS_SOURCE, EXCHANGES_SOURCE);
         }
         return rules;
     }
@@ -85,5 +95,22 @@ public class FixedParameterOptions {
             tickers.add(symbol.getSymbol());
         }
         return new ArrayList<>(tickers);
+    }
+
+    /**
+     * The venues a strategy may name, from the active exchanges.
+     *
+     * Codes rather than names or ids, because {@code exchangeCode} is the field a
+     * PUT carries - 'NSE', not 'National Stock Exchange of India'. A disabled
+     * exchange is left out: {@link SymbolResolver} would refuse a symbol on one
+     * anyway, so offering it would be offering a choice that cannot be saved.
+     */
+    private List<String> exchangeOptions() {
+        List<String> codes = new ArrayList<>();
+        for (Exchange exchange
+                : exchangeRepository.findByStatusOrderByNameAsc(Exchange.STATUS_ACTIVE)) {
+            codes.add(exchange.getCode());
+        }
+        return codes;
     }
 }

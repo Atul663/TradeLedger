@@ -77,8 +77,21 @@ public class FixedParameter {
      */
     public static final String TYPE_SYMBOL = "symbol";
 
+    /** The same, over the active {@code exchanges} - the venue's {@code code}. */
+    public static final String TYPE_EXCHANGE = "exchange";
+
+    /**
+     * The types whose options are rows in another table rather than a stored list.
+     *
+     * Everything that treats them alike reads this rather than naming them
+     * individually: the write rule that refuses authored options, and the read
+     * path that fills them. A third reference type joins by being added here.
+     */
+    public static final Set<String> REFERENCE_TYPES = Set.of(TYPE_SYMBOL, TYPE_EXCHANGE);
+
     public static final Set<String> TYPES = Set.of(
-            TYPE_INT, TYPE_DECIMAL, TYPE_BOOL, TYPE_ENUM, TYPE_TIMEFRAME, TYPE_TEXT, TYPE_SYMBOL);
+            TYPE_INT, TYPE_DECIMAL, TYPE_BOOL, TYPE_ENUM, TYPE_TIMEFRAME, TYPE_TEXT,
+            TYPE_SYMBOL, TYPE_EXCHANGE);
 
     /**
      * Whether the knob changes WHAT is computed or only HOW it is executed.

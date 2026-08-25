@@ -2,10 +2,12 @@ package com.example.tradeLedger;
 
 import com.example.tradeLedger.dto.FixedParameterRequest;
 import com.example.tradeLedger.dto.FixedParameterResponse;
+import com.example.tradeLedger.entity.Exchange;
 import com.example.tradeLedger.entity.FixedParameter;
 import com.example.tradeLedger.exception.ResourceConflictException;
 import com.example.tradeLedger.exception.StrategyValidationException;
 import com.example.tradeLedger.repository.FixedParameterRepository;
+import com.example.tradeLedger.repository.ExchangeRepository;
 import com.example.tradeLedger.repository.SymbolRepository;
 import com.example.tradeLedger.serviceImpl.FixedParameterOptions;
 import com.example.tradeLedger.serviceImpl.FixedParameterServiceImpl;
@@ -53,9 +55,11 @@ class FixedParameterWriteTest {
     void setUp() {
         repository = mock(FixedParameterRepository.class);
         SymbolRepository symbols = mock(SymbolRepository.class);
+        ExchangeRepository exchanges = mock(ExchangeRepository.class);
+        when(exchanges.findByStatusOrderByNameAsc(Exchange.STATUS_ACTIVE)).thenReturn(List.of());
         when(symbols.findByActiveTrueOrderBySymbolAsc()).thenReturn(List.of());
         FixedParameterOptions options =
-                new FixedParameterOptions(symbols, new JsonSupport(new ObjectMapper()));
+                new FixedParameterOptions(symbols, exchanges, new JsonSupport(new ObjectMapper()));
         service = new FixedParameterServiceImpl(repository, options,
                 new JsonSupport(new ObjectMapper()));
         when(repository.save(any())).thenAnswer(call -> call.getArgument(0));

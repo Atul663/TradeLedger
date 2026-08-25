@@ -122,7 +122,7 @@ type ExecutionMode = 'FIXED_QTY' | 'CAPITAL_PERCENT' | 'RISK_PERCENT';
 type InstanceStatus= 'active' | 'retired';
 type InstrumentType= 'spot' | 'future' | 'option' | 'index';
 type ParamType     = 'int' | 'decimal' | 'bool' | 'enum' | 'text';        // indicator paramSchema
-type FixedType     = ParamType | 'timeframe' | 'symbol';                  // fixedParameters[].dataType
+type FixedType     = ParamType | 'timeframe' | 'symbol' | 'exchange';     // fixedParameters[].dataType
 
 const STRIKE_OFFSETS = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15];   // ITM and OTM
 ```
@@ -411,8 +411,25 @@ newly listed instrument shows up without a deploy. Render it as a select like an
 
 Tickers, not ids — because `symbol` is what a PUT carries. **A ticker is unique
 per exchange, not globally**, so one listed on two venues appears in the list
-once; send `exchangeCode` with it, or send `symbolId` instead. `value` is `null`
-until a market is chosen, which is the state `deployable: false` describes.
+once. `value` is `null` until a market is chosen, which is the state
+`deployable: false` describes.
+
+**The `exchangeCode` knob sits before it**, same mechanism, over the active
+`exchanges`:
+
+```json
+{ "name": "exchangeCode", "label": "Exchange", "dataType": "exchange",
+  "scope": "signal", "required": true, "value": "NSE",
+  "validation": { "options": ["BSE", "NSE"],
+                  "optionsSource": "/api/v1/exchanges" },
+  "displayOrder": 0 }
+```
+
+Render the two together and submit both — `{"exchangeCode": "NSE", "symbol": "NIFTY"}`
+is the pair the API identifies an instrument by. Sending `symbol` alone is a 400
+(*"exchangeCode is required when identifying a symbol by name"*); `symbolId` on
+its own is the alternative. A disabled venue is not offered, since a symbol on one
+cannot be saved.
 
 **Write with the flat names.** These are read shapes. `PUT` takes `slPct`, not a
 group entry — see 5.2. And if the descriptor catalog is empty or a knob has been

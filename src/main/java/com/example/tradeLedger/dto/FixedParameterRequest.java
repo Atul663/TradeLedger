@@ -44,7 +44,7 @@ public class FixedParameterRequest {
 
     @Schema(description = "How the value is read. An enum needs options in validation.",
             example = "decimal",
-            allowableValues = {"int", "decimal", "bool", "enum", "timeframe", "text"})
+            allowableValues = {"int", "decimal", "bool", "enum", "timeframe", "text", "symbol", "exchange"})
     private String dataType;
 
     @Schema(description = "signal knobs are part of a strategy's shared identity, execution "

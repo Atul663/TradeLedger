@@ -24,7 +24,7 @@ public record FixedParameterResponse(
         @Schema(example = "SL %") String label,
         String description,
         @Schema(example = "decimal",
-                allowableValues = {"int", "decimal", "bool", "enum", "timeframe", "text"})
+                allowableValues = {"int", "decimal", "bool", "enum", "timeframe", "text", "symbol", "exchange"})
         String dataType,
         @Schema(example = "execution", allowableValues = {"signal", "execution"}) String scope,
         @Schema(description = "Text whatever the type is - coerce it with dataType.",

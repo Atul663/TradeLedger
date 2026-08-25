@@ -162,6 +162,11 @@ public class StrategyFixedParameters {
         // PUT carries. Null until a market is chosen, which is the state
         // 'deployable: false' describes.
         readers.put("symbol", s -> s.getSymbol() != null ? s.getSymbol().getSymbol() : null);
+        // Derived, not stored: a strategy has no exchange column, it has a symbol
+        // and the symbol has a venue. Same value the flat exchangeCode field
+        // carries, off the same path.
+        readers.put("exchangeCode", s -> s.getSymbol() != null
+                ? s.getSymbol().getExchange().getCode() : null);
         readers.put("candleDuration", UserStrategy::getCandleDuration);
         readers.put("triggerDuration", UserStrategy::getTriggerDuration);
         readers.put("derivative", s -> s.getDerivative() != null ? s.getDerivative().name() : null);

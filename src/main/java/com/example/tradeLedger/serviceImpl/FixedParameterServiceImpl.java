@@ -363,13 +363,13 @@ public class FixedParameterServiceImpl implements FixedParameterService {
             errors.add("validation.min/max only apply to an int or decimal, not " + dataType);
         }
 
-        // A symbol knob's choices are rows, not an authored vocabulary. Accepting a
-        // list here would let an admin freeze one, and it would be wrong the next
-        // time an instrument is listed - the read path fills them from the table.
-        if (FixedParameter.TYPE_SYMBOL.equals(dataType)) {
+        // A reference knob's choices are rows, not an authored vocabulary. Accepting
+        // a list here would let an admin freeze one, and it would be wrong the next
+        // time a row is added - the read path fills them from the table instead.
+        if (FixedParameter.REFERENCE_TYPES.contains(dataType)) {
             if (rules.containsKey(KEY_OPTIONS)) {
-                errors.add("validation.options cannot be set on a symbol knob - its choices are "
-                        + "the active symbols and are filled in from /api/v1/symbols on read");
+                errors.add("validation.options cannot be set on a " + dataType + " knob - its "
+                        + "choices are rows and are filled in from the table on read");
             }
             return rules;
         }

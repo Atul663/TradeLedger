@@ -4,12 +4,14 @@ import com.example.tradeLedger.dto.FixedParameterGroupResponse;
 import com.example.tradeLedger.dto.StrategyFixedParameterGroupResponse;
 import com.example.tradeLedger.dto.StrategyFixedParameterResponse;
 import com.example.tradeLedger.entity.Derivative;
+import com.example.tradeLedger.entity.Exchange;
 import com.example.tradeLedger.entity.FixedParameter;
 import com.example.tradeLedger.entity.LotRule;
 import com.example.tradeLedger.entity.Moneyness;
 import com.example.tradeLedger.entity.Symbol;
 import com.example.tradeLedger.entity.UserStrategy;
 import com.example.tradeLedger.repository.FixedParameterRepository;
+import com.example.tradeLedger.repository.ExchangeRepository;
 import com.example.tradeLedger.repository.SymbolRepository;
 import com.example.tradeLedger.serviceImpl.FixedParameterOptions;
 import com.example.tradeLedger.serviceImpl.StrategyFixedParameters;
@@ -47,6 +49,7 @@ class StrategyFixedParametersTest {
 
     private FixedParameterRepository catalog;
     private SymbolRepository symbols;
+    private ExchangeRepository exchanges;
     private StrategyFixedParameters fixedParameters;
 
     @BeforeEach
@@ -55,15 +58,32 @@ class StrategyFixedParametersTest {
         symbols = mock(SymbolRepository.class);
         when(symbols.findByActiveTrueOrderBySymbolAsc()).thenReturn(List.of(
                 symbol("BANKNIFTY"), symbol("NIFTY")));
+        exchanges = mock(ExchangeRepository.class);
+        when(exchanges.findByStatusOrderByNameAsc(Exchange.STATUS_ACTIVE))
+                .thenReturn(List.of(exchange("BSE"), exchange("NSE")));
         fixedParameters = new StrategyFixedParameters(catalog,
-                new FixedParameterOptions(symbols, new JsonSupport(new ObjectMapper())));
+                new FixedParameterOptions(symbols, exchanges, new JsonSupport(new ObjectMapper())));
+    }
+
+    private static Exchange exchange(String code) {
+        Exchange exchange = new Exchange();
+        exchange.setId(UUID.randomUUID());
+        exchange.setCode(code);
+        exchange.setName(code + " exchange");
+        exchange.setStatus(Exchange.STATUS_ACTIVE);
+        return exchange;
     }
 
     private static Symbol symbol(String ticker) {
+        return symbol(ticker, "NSE");
+    }
+
+    private static Symbol symbol(String ticker, String exchangeCode) {
         Symbol symbol = new Symbol();
         symbol.setId(UUID.randomUUID());
         symbol.setSymbol(ticker);
         symbol.setActive(true);
+        symbol.setExchange(exchange(exchangeCode));
         return symbol;
     }
 
@@ -77,9 +97,10 @@ class StrategyFixedParametersTest {
                 descriptor("Instrument", 2, "ceEnabled", "bool", null),
                 descriptor("Instrument", 3, "ceMoneyness", "enum", null),
                 descriptor("Instrument", 4, "ceStrikeOffset", "int", null),
-                descriptor("Market", 0, "symbol", FixedParameter.TYPE_SYMBOL, null),
-                descriptor("Market", 1, "candleDuration", "timeframe", null),
-                descriptor("Market", 2, "triggerDuration", "timeframe", null),
+                descriptor("Market", 0, "exchangeCode", FixedParameter.TYPE_EXCHANGE, null),
+                descriptor("Market", 1, "symbol", FixedParameter.TYPE_SYMBOL, null),
+                descriptor("Market", 2, "candleDuration", "timeframe", null),
+                descriptor("Market", 3, "triggerDuration", "timeframe", null),
                 descriptor("Sizing", 1, "lotRule", "enum", null),
                 descriptor("Sizing", 2, "baseLot", "int", null),
                 // Describes a user_strategy_subscriptions column, not a strategy one.
@@ -211,6 +232,66 @@ class StrategyFixedParametersTest {
                 "the tickers, in the order the table returns them");
         assertEquals("/api/v1/symbols", knob.validation().get("optionsSource"));
         assertEquals("NIFTY", knob.value(), "the ticker, matching the vocabulary of its options");
+    }
+
+    /**
+     * The venue knob, on the same mechanism. It is the one that makes the symbol
+     * knob's output submittable: a ticker is unique per exchange, so a form has to
+     * be able to offer the venue beside it.
+     */
+    @Test
+    void theExchangeKnobIsOfferedTheActiveExchangesFromTheTable() {
+        seedCatalog();
+
+        StrategyFixedParameterResponse knob = byName(fixedParameters.forStrategy(strategy()))
+                .get("exchangeCode");
+
+        assertEquals(FixedParameter.TYPE_EXCHANGE, knob.dataType());
+        assertEquals(List.of("BSE", "NSE"), knob.validation().get("options"),
+                "the codes, in the order the table returns them");
+        assertEquals("/api/v1/exchanges", knob.validation().get("optionsSource"));
+        assertEquals("NSE", knob.value(), "read through the strategy's symbol, which has the venue");
+    }
+
+    /** A disabled venue cannot carry a saveable symbol, so it is not offered. */
+    @Test
+    void onlyActiveExchangesAreOffered() {
+        seedCatalog();
+        when(exchanges.findByStatusOrderByNameAsc(Exchange.STATUS_ACTIVE))
+                .thenReturn(List.of(exchange("NSE")));
+
+        assertEquals(List.of("NSE"),
+                byName(fixedParameters.forStrategy(strategy())).get("exchangeCode").validation()
+                        .get("options"));
+    }
+
+    /** No market yet means no venue to report - the same state symbol is in. */
+    @Test
+    void aStrategyWithNoMarketReportsANullExchange() {
+        seedCatalog();
+        UserStrategy blank = strategy();
+        blank.setSymbol(null);
+
+        StrategyFixedParameterResponse knob = byName(fixedParameters.forStrategy(blank))
+                .get("exchangeCode");
+
+        assertNull(knob.value());
+        assertEquals(List.of("BSE", "NSE"), knob.validation().get("options"),
+                "there is still a list to pick from");
+    }
+
+    /** The venue narrows the instrument, so a form has to draw it first. */
+    @Test
+    void theVenueIsOrderedBeforeTheInstrument() {
+        seedCatalog();
+
+        List<String> market = fixedParameters.forStrategy(strategy()).stream()
+                .filter(group -> "Market".equals(group.paramGroup()))
+                .flatMap(group -> group.parameters().stream())
+                .map(StrategyFixedParameterResponse::name)
+                .toList();
+
+        assertEquals(List.of("exchangeCode", "symbol", "candleDuration", "triggerDuration"), market);
     }
 
     /** Listing an instrument has to change the list, which a stored copy could not do. */

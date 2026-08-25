@@ -40,7 +40,7 @@ public record StrategyFixedParameterResponse(
         String description,
 
         @Schema(example = "decimal",
-                allowableValues = {"int", "decimal", "bool", "enum", "timeframe", "text"})
+                allowableValues = {"int", "decimal", "bool", "enum", "timeframe", "text", "symbol", "exchange"})
         String dataType,
 
         @Schema(description = "signal knobs are part of the config hash; execution knobs are not.",
