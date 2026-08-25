@@ -55,6 +55,15 @@ values on the same symbol and candle share one computation, whatever else differ
 So the builder form is built **once** by hand for everything except the indicator
 block, which is generated from each indicator's `paramSchema`.
 
+**Or generate all of it.** The template and strategy responses also carry the
+same content pre-arranged into form sections — `fixedParameters[]` grouped by
+`paramGroup` (market, instrument, sizing, exits), each field with its label,
+type, bounds and — on a saved strategy — its current value; and
+`indicatorGroups[]` grouped by indicator name. That is an **arrangement of the
+same fields**, not a second source of truth: every value in it is also a flat
+field, and a PUT still addresses the flat name. Hand-build the form or walk the
+groups — both read the same row.
+
 ---
 
 ## 2. Transport basics
@@ -214,11 +223,34 @@ different shared computation. Nothing broke — do not show a scary message.
         "k": {"type":"int","min":1,"max":300,"default":21},
         "d": {"type":"int","min":1,"max":300,"default":9,"lt":"k"}
       } } ],
+  "indicatorGroups": [ {
+      "indicatorName": "EMA AVERAGING", "usageCount": 1, "count": 1,
+      "indicators": [ { "id": "b2e4…", "name": "EMA AVERAGING", "active": true,
+                        "paramSchema": { "k": {…}, "d": {…} } } ] } ],
+  "fixedParameters": [ {
+      "paramGroup": "exits", "count": 2,
+      "parameters": [ {
+          "id": "…", "name": "slPct", "label": "Stop loss %",
+          "description": "Percent move against the position that closes it…",
+          "dataType": "decimal", "scope": "execution",
+          "defaultValue": "2.5", "validation": {"min":0,"max":100},
+          "displayOrder": 1, "required": false, "active": true } ] } ],
   "unknownIndicators": [],
   "instanceCount": 4, "strategyCount": 12,
   "createdAt": "2026-08-23T15:58:49.123+05:30", "updatedAt": "…"
 } ]
 ```
+
+`indicatorGroups[]` is `indicators[]` arranged one group per indicator name.
+`usageCount` is how many nodes of the rule tree name that indicator — **that is
+how many tuning rows a strategy built from this template will carry**, so a
+template naming EMA twice gives `usageCount: 2` and the strategy gets two.
+
+`fixedParameters[]` is the platform's fixed knobs, grouped by `paramGroup` and
+ordered the way a form lays them out. Descriptors only here — a template holds no
+values. They are the same sections, in the same order, that
+`GET /api/v1/my-strategies/{id}` returns with values filled in, so one form draws
+a blank template and a saved strategy alike.
 
 #### Rendering an indicator input from `paramSchema`
 
@@ -310,6 +342,25 @@ twice.
       "paramSchema": { "k": {"type":"int","min":1,"max":300,"default":21},
                        "d": {"type":"int","min":1,"max":300,"default":9,"lt":"k"} } } ],
 
+  "indicatorGroups": [ {
+      "indicatorId": "…", "indicatorName": "EMA AVERAGING",
+      "count": 1, "enabled": true,
+      "schema": { "k": {…}, "d": {…} },
+      "indicators": [ { …the same row as above… } ] } ],
+
+  "fixedParameters": [ {
+      "paramGroup": "exits", "count": 2,
+      "parameters": [
+        { "id": "…", "name": "slPct", "label": "Stop loss %",
+          "dataType": "decimal", "scope": "execution",
+          "value": 1.50,
+          "defaultValue": "2.5", "validation": {"min":0,"max":100},
+          "displayOrder": 1, "required": false },
+        { "name": "tpPct", "label": "Take profit %", "value": 3.00, … } ] },
+    { "paramGroup": "instrument", "count": 7, "parameters": [ … ] },
+    { "paramGroup": "market",     "count": 2, "parameters": [ … ] },
+    { "paramGroup": "sizing",     "count": 3, "parameters": [ … ] } ],
+
   "sharedConfigId": "…", "configHash": "a3f1…",
   "deployable": true, "deploymentCount": 3,
   "active": true, "createdAt": "…", "updatedAt": "…"
@@ -326,6 +377,26 @@ Two views of the same choice, on purpose:
 
 `deployable` is false until symbol and candle are set — use it to gate the deploy
 button. `deploymentCount` tells the user how many brokers an edit will move.
+
+**Three arrangements, one row.** `indicatorGroups[]` and `fixedParameters[]` are
+`indicators[]` and the flat `ce*`/`pe*`/`lotRule`/`slPct`… fields, rearranged for
+a form:
+
+- `indicatorGroups[]` — one group per indicator name. It only differs from the
+  flat list when a template names the same indicator twice, which is exactly when
+  the flat list reads as repeating look-alike rows; `slot` tells the usages apart,
+  `enabled` on the group is true while **any** usage is. `schema` is hoisted to
+  the group because it belongs to the indicator, and is still on every row.
+- `fixedParameters[]` — one group per `paramGroup`, each field carrying its
+  descriptor (from `/api/v1/fixed-parameters`) **and** its `value` on this
+  strategy, already typed. The `deployment` group is absent: those knobs are
+  columns on a subscription, not on a strategy, and they come back on
+  `/api/v1/my-subscriptions`.
+
+**Write with the flat names.** These are read shapes. `PUT` takes `slPct`, not a
+group entry — see 5.2. And if the descriptor catalog is empty or a knob has been
+deactivated, `fixedParameters[]` shrinks or empties while the flat fields stay
+exactly as they were.
 
 ### 5.4 `GET /api/v1/my-strategies/{id}/runtime` — the bot shape
 

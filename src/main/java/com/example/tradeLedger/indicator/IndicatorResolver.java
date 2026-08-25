@@ -44,6 +44,22 @@ public final class IndicatorResolver {
         return names;
     }
 
+    /**
+     * How many nodes of the tree name each indicator, in first-seen order -
+     * {@code {"EMA": 2, "RSI": 1}}.
+     *
+     * {@link #indicatorNames} answers WHICH; this answers HOW MANY, which is how
+     * many tuning rows a strategy built from the tree carries for that indicator.
+     * Counting NODES rather than resolved computations is deliberate: two nodes
+     * that happen to bind the same values are still two usages of the form, even
+     * though {@link #resolve} folds them into one computation.
+     */
+    public static Map<String, Integer> indicatorNameCounts(JsonNode ruleTree) {
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        countNames(ruleTree, counts);
+        return counts;
+    }
+
     /** Distinct {@code $key} placeholders the tree expects, without the leading '$'. */
     public static Set<String> bindings(JsonNode ruleTree) {
         Set<String> keys = new LinkedHashSet<>();
@@ -79,6 +95,23 @@ public final class IndicatorResolver {
             out.add(node.get("ind").asText());
         }
         node.properties().forEach(entry -> collectNames(entry.getValue(), out));
+    }
+
+    private static void countNames(JsonNode node, Map<String, Integer> out) {
+        if (node == null) {
+            return;
+        }
+        if (node.isArray()) {
+            node.forEach(child -> countNames(child, out));
+            return;
+        }
+        if (!node.isObject()) {
+            return;
+        }
+        if (node.hasNonNull("ind")) {
+            out.merge(node.get("ind").asText(), 1, Integer::sum);
+        }
+        node.properties().forEach(entry -> countNames(entry.getValue(), out));
     }
 
     private static void collectBindings(JsonNode node, Set<String> out) {

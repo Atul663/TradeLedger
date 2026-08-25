@@ -16,6 +16,7 @@ import com.example.tradeLedger.service.CurrentUserService;
 import com.example.tradeLedger.service.SharedStrategyConfigService;
 import com.example.tradeLedger.serviceImpl.IndicatorParams;
 import com.example.tradeLedger.serviceImpl.RuleTrees;
+import com.example.tradeLedger.serviceImpl.StrategyFixedParameters;
 import com.example.tradeLedger.serviceImpl.SubscriptionFanOut;
 import com.example.tradeLedger.serviceImpl.SymbolResolver;
 import com.example.tradeLedger.serviceImpl.UserStrategyServiceImpl;
@@ -78,6 +79,7 @@ class UserStrategyGroupingTest {
                 mock(UserStrategyValidator.class),
                 mock(SymbolResolver.class),
                 mock(RuleTrees.class),
+                mock(StrategyFixedParameters.class),
                 new JsonSupport(new ObjectMapper()));
     }
 

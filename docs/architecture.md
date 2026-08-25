@@ -658,15 +658,16 @@ All strategy-module endpoints require `Authorization: Bearer <accessToken>`.
 | GET | `/api/v1/indicators/{id}`, `/by-name/{name}` | Name is uppercased before lookup |
 | POST/PUT/DELETE | `/api/v1/indicators`, `/{id}` | Rename and delete blocked while referenced |
 | GET | `/api/v1/fixed-parameters?group=&scope=&active=` | The fixed knobs' labels, types, defaults and bounds, ordered as a form lays them out |
+| GET | `/api/v1/fixed-parameters/grouped?group=&scope=&active=` | The same rows, one group per `paramGroup` — the sections a form renders |
 | GET | `/api/v1/fixed-parameters/{id}`, `/by-name/{name}` | Name matched case-insensitively |
 | POST/PUT/DELETE | `/api/v1/fixed-parameters`, `/{id}` | **Descriptors, not values** — nothing here changes what a strategy runs with. `defaultValue` is parsed against `dataType` and `validation` on write |
-| GET | `/api/v1/strategy-templates?active=&search=` | The template + its indicators' schemas |
+| GET | `/api/v1/strategy-templates?active=&search=` | The template + its indicators' schemas, also grouped by indicator name (`indicatorGroups[]`) and the fixed-knob descriptors grouped by section (`fixedParameters[]`) |
 | GET | `/api/v1/strategy-templates/{id}`, `/by-name/{name}` | |
 | POST | `/api/v1/strategy-templates` | 201, `is_system` forced false |
 | PUT / DELETE | `/api/v1/strategy-templates/{id}` | 409 on system rows; rule tree frozen once strategies exist |
 | GET/POST | `/api/v1/my-strategies` | The caller's strategies, ownership-filtered |
 | GET | `/api/v1/my-strategies/grouped?active=&strategyId=` | The same rows, one group per template, each tagged with its `strategyName` |
-| GET/PUT/DELETE | `/api/v1/my-strategies/{id}` | Editor shape. Another user's row reports **404, not 403** |
+| GET/PUT/DELETE | `/api/v1/my-strategies/{id}` | Editor shape: the flat fields, plus the same content arranged as `indicatorGroups[]` (by indicator name) and `fixedParameters[]` (by `paramGroup`, descriptor + value). Writes address the flat names. Another user's row reports **404, not 403** |
 | GET | `/api/v1/my-strategies/{id}/runtime` | Bot shape: legs resolved, values coerced |
 | POST | `/api/v1/my-strategies/{id}/deploy` | **Fan out to many brokers**, per-target outcome |
 | GET/POST | `/api/v1/my-subscriptions` | Deployments, ownership-filtered |

@@ -1,5 +1,6 @@
 package com.example.tradeLedger.serviceImpl;
 
+import com.example.tradeLedger.dto.FixedParameterGroupResponse;
 import com.example.tradeLedger.dto.FixedParameterRequest;
 import com.example.tradeLedger.dto.FixedParameterResponse;
 import com.example.tradeLedger.entity.FixedParameter;
@@ -74,6 +75,28 @@ public class FixedParameterServiceImpl implements FixedParameterService {
                 .filter(row -> wantedScope == null || wantedScope.equals(row.getScope()))
                 .map(this::toResponse)
                 .toList();
+    }
+
+    /**
+     * The flat list folded into its sections.
+     *
+     * Built on top of {@link #list} rather than beside it, so the two can never
+     * disagree about which rows a filter admits or what order they come in - the
+     * list is already ordered by group, so consecutive rows of one group form a
+     * run and a LinkedHashMap keeps the runs in catalog order.
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public List<FixedParameterGroupResponse> listGrouped(String paramGroup, String scope,
+                                                         Boolean active) {
+        Map<String, List<FixedParameterResponse>> byGroup = new LinkedHashMap<>();
+        for (FixedParameterResponse row : list(paramGroup, scope, active)) {
+            byGroup.computeIfAbsent(row.paramGroup(), key -> new ArrayList<>()).add(row);
+        }
+        List<FixedParameterGroupResponse> groups = new ArrayList<>();
+        byGroup.forEach((group, rows) ->
+                groups.add(new FixedParameterGroupResponse(group, rows.size(), rows)));
+        return groups;
     }
 
     @Override

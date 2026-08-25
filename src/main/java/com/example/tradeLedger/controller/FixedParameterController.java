@@ -1,5 +1,6 @@
 package com.example.tradeLedger.controller;
 
+import com.example.tradeLedger.dto.FixedParameterGroupResponse;
 import com.example.tradeLedger.dto.FixedParameterRequest;
 import com.example.tradeLedger.dto.FixedParameterResponse;
 import com.example.tradeLedger.service.FixedParameterService;
@@ -55,6 +56,22 @@ public class FixedParameterController extends SecuredController {
         log.info("GET fixed parameters group={} scope={} active={} | user={}",
                 group, scope, active, currentEmail());
         return fixedParameterService.list(group, scope, active);
+    }
+
+    @GetMapping("/grouped")
+    @Operation(summary = "List fixed parameters grouped by paramGroup",
+            description = "The same rows as the flat list, arranged one group per `paramGroup` "
+                    + "- the sections a form renders. Groups come back in catalog order, rows "
+                    + "inside a group by position then name, and the same `group`, `scope` and "
+                    + "`active` filters apply - `group` narrows it to that one group. "
+                    + "Descriptors with no group collect in a single entry whose `paramGroup` "
+                    + "is null.")
+    public List<FixedParameterGroupResponse> listGrouped(@RequestParam(required = false) String group,
+                                                         @RequestParam(required = false) String scope,
+                                                         @RequestParam(required = false) Boolean active) {
+        log.info("GET fixed parameters grouped group={} scope={} active={} | user={}",
+                group, scope, active, currentEmail());
+        return fixedParameterService.listGrouped(group, scope, active);
     }
 
     @GetMapping("/{id}")

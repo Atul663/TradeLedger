@@ -1,5 +1,6 @@
 package com.example.tradeLedger.service;
 
+import com.example.tradeLedger.dto.FixedParameterGroupResponse;
 import com.example.tradeLedger.dto.FixedParameterRequest;
 import com.example.tradeLedger.dto.FixedParameterResponse;
 
@@ -38,6 +39,20 @@ public interface FixedParameterService {
      * @param active     optional active-flag filter; null returns both
      */
     List<FixedParameterResponse> list(String paramGroup, String scope, Boolean active);
+
+    /**
+     * The same rows as {@link #list}, arranged one group per {@code paramGroup} -
+     * the sections a form renders.
+     *
+     * The grouping is the only thing the flat list cannot express cheaply, since a
+     * client would otherwise have to know that consecutive rows share a section.
+     * The same filters apply and mean the same things; a group filter narrows it
+     * to that one group rather than changing the shape. Descriptors with no group
+     * collect in a single trailing entry whose {@code paramGroup} is null.
+     *
+     * @return groups in catalog order, each holding its rows in displayOrder-then-name order
+     */
+    List<FixedParameterGroupResponse> listGrouped(String paramGroup, String scope, Boolean active);
 
     FixedParameterResponse get(UUID id);
 

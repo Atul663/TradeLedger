@@ -5,6 +5,7 @@ import com.example.tradeLedger.dto.StrategyDeploymentResponse;
 import com.example.tradeLedger.dto.StrategySubscriptionRequest;
 import com.example.tradeLedger.dto.StrategySubscriptionResponse;
 import com.example.tradeLedger.dto.UserStrategyGroupResponse;
+import com.example.tradeLedger.dto.UserStrategyIndicatorGroupResponse;
 import com.example.tradeLedger.dto.UserStrategyIndicatorResponse;
 import com.example.tradeLedger.dto.UserStrategyRequest;
 import com.example.tradeLedger.dto.UserStrategyResponse;
@@ -70,6 +71,7 @@ public class UserStrategyServiceImpl implements UserStrategyService {
     private final UserStrategyValidator validator;
     private final SymbolResolver symbolResolver;
     private final RuleTrees ruleTrees;
+    private final StrategyFixedParameters fixedParameters;
     private final JsonSupport json;
 
     public UserStrategyServiceImpl(CurrentUserService currentUserService,
@@ -86,6 +88,7 @@ public class UserStrategyServiceImpl implements UserStrategyService {
                                    UserStrategyValidator validator,
                                    SymbolResolver symbolResolver,
                                    RuleTrees ruleTrees,
+                                   StrategyFixedParameters fixedParameters,
                                    JsonSupport json) {
         this.currentUserService = currentUserService;
         this.userStrategyRepository = userStrategyRepository;
@@ -101,6 +104,7 @@ public class UserStrategyServiceImpl implements UserStrategyService {
         this.validator = validator;
         this.symbolResolver = symbolResolver;
         this.ruleTrees = ruleTrees;
+        this.fixedParameters = fixedParameters;
         this.json = json;
     }
 
@@ -733,9 +737,16 @@ public class UserStrategyServiceImpl implements UserStrategyService {
         SharedStrategyConfig config = strategy.getSharedConfig();
 
         List<UserStrategyIndicatorResponse> indicators = new ArrayList<>();
+        // Grouped in the SAME pass that builds the flat list, and holding the very
+        // same objects: the two arrangements cannot end up disagreeing about a row
+        // because there is only one row. Keyed by name rather than by id, because
+        // the name is what the group is tagged with.
+        Map<String, Indicator> groupIndicator = new LinkedHashMap<>();
+        Map<String, List<UserStrategyIndicatorResponse>> byName = new LinkedHashMap<>();
+
         for (UserStrategyIndicator row : indicatorRows(strategy)) {
             Indicator indicator = row.getIndicator();
-            indicators.add(new UserStrategyIndicatorResponse(
+            UserStrategyIndicatorResponse usage = new UserStrategyIndicatorResponse(
                     row.getId(),
                     indicator.getId(),
                     indicator.getName(),
@@ -743,8 +754,23 @@ public class UserStrategyServiceImpl implements UserStrategyService {
                     row.isEnabled(),
                     row.getDisplayOrder(),
                     json.toMap(row.getParams()),
-                    json.toMap(indicator.getParamSchema())));
+                    json.toMap(indicator.getParamSchema()));
+            indicators.add(usage);
+            groupIndicator.putIfAbsent(indicator.getName(), indicator);
+            byName.computeIfAbsent(indicator.getName(), key -> new ArrayList<>()).add(usage);
         }
+
+        List<UserStrategyIndicatorGroupResponse> indicatorGroups = new ArrayList<>();
+        byName.forEach((name, usages) -> {
+            Indicator indicator = groupIndicator.get(name);
+            indicatorGroups.add(new UserStrategyIndicatorGroupResponse(
+                    indicator.getId(),
+                    name,
+                    usages.size(),
+                    usages.stream().anyMatch(UserStrategyIndicatorResponse::enabled),
+                    json.toMap(indicator.getParamSchema()),
+                    usages));
+        });
 
         return new UserStrategyResponse(
                 strategy.getId(),
@@ -774,6 +800,8 @@ public class UserStrategyServiceImpl implements UserStrategyService {
                 strategy.getSlPct(),
                 strategy.getTpPct(),
                 indicators,
+                indicatorGroups,
+                fixedParameters.forStrategy(strategy),
                 config != null ? config.getId() : null,
                 config != null ? config.getConfigHash() : null,
                 strategy.isDeployable(),

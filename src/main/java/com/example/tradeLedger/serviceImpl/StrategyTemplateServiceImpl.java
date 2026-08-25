@@ -2,6 +2,7 @@ package com.example.tradeLedger.serviceImpl;
 
 import com.example.tradeLedger.dto.IndicatorSummaryResponse;
 import com.example.tradeLedger.dto.StrategyTemplateDetailResponse;
+import com.example.tradeLedger.dto.StrategyTemplateIndicatorGroupResponse;
 import com.example.tradeLedger.dto.StrategyTemplateRequest;
 import com.example.tradeLedger.entity.Indicator;
 import com.example.tradeLedger.entity.StrategyTemplate;
@@ -23,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -46,6 +48,7 @@ public class StrategyTemplateServiceImpl implements StrategyTemplateService {
     private final UserStrategyRepository userStrategyRepository;
     private final IndicatorRepository indicatorRepository;
     private final StrategyTemplateValidator validator;
+    private final StrategyFixedParameters fixedParameters;
     private final JsonSupport json;
 
     public StrategyTemplateServiceImpl(StrategyTemplateRepository strategyRepository,
@@ -53,12 +56,14 @@ public class StrategyTemplateServiceImpl implements StrategyTemplateService {
                                        UserStrategyRepository userStrategyRepository,
                                        IndicatorRepository indicatorRepository,
                                        StrategyTemplateValidator validator,
+                                       StrategyFixedParameters fixedParameters,
                                        JsonSupport json) {
         this.strategyRepository = strategyRepository;
         this.sharedConfigRepository = sharedConfigRepository;
         this.userStrategyRepository = userStrategyRepository;
         this.indicatorRepository = indicatorRepository;
         this.validator = validator;
+        this.fixedParameters = fixedParameters;
         this.json = json;
     }
 
@@ -254,21 +259,29 @@ public class StrategyTemplateServiceImpl implements StrategyTemplateService {
      */
     private StrategyTemplateDetailResponse toResponse(StrategyTemplate template) {
         List<IndicatorSummaryResponse> indicators = new ArrayList<>();
+        List<StrategyTemplateIndicatorGroupResponse> groups = new ArrayList<>();
         List<String> unknown = new ArrayList<>();
 
         JsonNode tree = json.readTree(template.getRuleTree());
         if (tree != null) {
-            for (String name : IndicatorResolver.indicatorNames(tree)) {
+            // The tree resolves to distinct names, so a group holds one indicator;
+            // what varies is how many NODES named it, and that is the number a
+            // builder form needs - it is how many tuning rows it has to draw.
+            for (Map.Entry<String, Integer> named : IndicatorResolver.indicatorNameCounts(tree).entrySet()) {
+                String name = named.getKey();
                 Indicator indicator = indicatorRepository.findByName(name).orElse(null);
                 if (indicator == null || !indicator.isActive()) {
                     unknown.add(name);
                     continue;
                 }
-                indicators.add(new IndicatorSummaryResponse(
+                IndicatorSummaryResponse summary = new IndicatorSummaryResponse(
                         indicator.getId(),
                         indicator.getName(),
                         indicator.isActive(),
-                        json.toMap(indicator.getParamSchema())));
+                        json.toMap(indicator.getParamSchema()));
+                indicators.add(summary);
+                groups.add(new StrategyTemplateIndicatorGroupResponse(
+                        indicator.getName(), named.getValue(), 1, List.of(summary)));
             }
         }
 
@@ -281,6 +294,8 @@ public class StrategyTemplateServiceImpl implements StrategyTemplateService {
                 template.isActive(),
                 json.toMap(template.getRuleTree()),
                 indicators,
+                groups,
+                fixedParameters.descriptors(),
                 unknown,
                 sharedConfigRepository.countByStrategy_Id(template.getId()),
                 userStrategyRepository.countByStrategy_Id(template.getId()),

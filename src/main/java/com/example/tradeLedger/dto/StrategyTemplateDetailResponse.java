@@ -22,7 +22,8 @@ import java.util.UUID;
 
                 One GET is enough to draw the "new strategy" form: indicators[].paramSchema is \
                 the only part that varies per template, because the instrument, strike, ladder \
-                and exit fields are fixed columns and identical everywhere.""")
+                and exit fields are fixed columns and identical everywhere - and those come \
+                back too, as fixedParameters[], grouped the way the form lays them out.""")
 public record StrategyTemplateDetailResponse(
 
         @Schema(example = "3f1b0c7e-9a41-4c2e-9f11-2b7d5a6e8c01")
@@ -51,6 +52,18 @@ public record StrategyTemplateDetailResponse(
 
         @Schema(description = "The indicators the rule tree names, each with its schema.")
         List<IndicatorSummaryResponse> indicators,
+
+        @Schema(description = "The SAME indicators, arranged one group per indicator name, with "
+                + "usageCount saying how many nodes of the tree name each - which is how many "
+                + "tuning rows a strategy built from this template will carry. The arrangement "
+                + "a builder form walks; it matches the shape my-strategies returns.")
+        List<StrategyTemplateIndicatorGroupResponse> indicatorGroups,
+
+        @Schema(description = "The platform's fixed knobs, grouped by paramGroup - market, "
+                + "instrument, sizing, exits. Descriptors only, because a template holds no "
+                + "values: the same sections the saved strategy returns, in the same order, so "
+                + "one form draws a blank template and a saved strategy alike.")
+        List<FixedParameterGroupResponse> fixedParameters,
 
         @Schema(description = "Names the rule tree references that resolve to no ACTIVE "
                 + "indicator. Non-empty means the tree is broken - block building on it, "

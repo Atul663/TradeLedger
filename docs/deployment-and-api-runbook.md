@@ -619,6 +619,29 @@ descriptor per fixed column. Unlike indicator schemas, seeding is **insert-only*
 a row you edit here survives the next deploy.
 
 ```http
+GET {{BASE}}/api/v1/fixed-parameters/grouped?active=true
+```
+
+**200** — the same rows folded into the sections a form renders. Same filters,
+same order; `group=` narrows it to that one group.
+
+```json
+[ { "paramGroup": "exits", "count": 2,
+    "parameters": [ { "name": "slPct", "label": "Stop loss %", … },
+                    { "name": "tpPct", "label": "Take profit %", … } ] },
+  { "paramGroup": "instrument", "count": 7, "parameters": [ … ] } ]
+```
+
+A descriptor with no group collects in a single entry whose `paramGroup` is
+`null`.
+
+The same fold, with each field's **value** filled in, comes back on
+`GET /api/v1/my-strategies/{id}` as `fixedParameters[]` — the strategy-scope
+knobs only, since the `deployment` group describes subscription columns. It is an
+arrangement of the flat fields, not a second source of truth: writes still go
+through `PUT /api/v1/my-strategies/{id}` with the flat name.
+
+```http
 GET  {{BASE}}/api/v1/fixed-parameters/by-name/slPct
 POST {{BASE}}/api/v1/fixed-parameters
 { "name": "trailStopPct", "label": "Trailing stop %", "dataType": "decimal",

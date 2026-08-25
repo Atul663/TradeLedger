@@ -20,7 +20,11 @@ import java.util.UUID;
                 One saved strategy, complete. The ce*/pe* fields are the EDITABLE form - the same \
                 names the request takes - while legs[] is the same choice derived for display. \
                 Each indicator carries both its current values and its schema, so the form can \
-                render an input for a knob nobody hardcoded.""")
+                render an input for a knob nobody hardcoded.
+
+                indicatorGroups[] and fixedParameters[] are the same content ARRANGED for a \
+                form - by indicator name, and by paramGroup. Nothing is only there: every value \
+                in them is also a flat field, and a PUT addresses the flat name.""")
 public record UserStrategyResponse(
 
         @Schema(example = "us000000-1111-4222-8333-444444444444")
@@ -114,7 +118,22 @@ public record UserStrategyResponse(
 
         // --------------------------------------------------------- indicators
 
+        @Schema(description = "Every indicator usage, flat and in display order.")
         List<UserStrategyIndicatorResponse> indicators,
+
+        @Schema(description = "The SAME usages, arranged one group per indicator name. A "
+                + "template that names the same indicator twice gives one group with two "
+                + "usages in it, instead of two look-alike rows.")
+        List<UserStrategyIndicatorGroupResponse> indicatorGroups,
+
+        // ---------------------------------------------------- fixed knobs
+
+        @Schema(description = "The fixed knobs above, arranged one group per paramGroup - "
+                + "market, instrument, sizing, exits - each carrying its descriptor from "
+                + "fixed_parameters and its current value. A second ARRANGEMENT of the flat "
+                + "fields, not a second source of truth: PUT still addresses the flat name. "
+                + "Empty if the descriptor catalog has been emptied.")
+        List<StrategyFixedParameterGroupResponse> fixedParameters,
 
         // ------------------------------------------------------------ runtime
 
