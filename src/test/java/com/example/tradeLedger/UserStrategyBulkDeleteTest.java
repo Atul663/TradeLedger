@@ -99,7 +99,6 @@ class UserStrategyBulkDeleteTest {
                 mock(UserStrategyValidator.class),
                 mock(SymbolResolver.class),
                 mock(RuleTrees.class),
-                IndicatorGroupingTest.emptyFixedParameters(),
                 new JsonSupport(new ObjectMapper()));
     }
 

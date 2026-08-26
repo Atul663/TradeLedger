@@ -7,9 +7,9 @@ import java.util.List;
 /**
  * The indicators a template's rule tree names, under one name.
  *
- * The same arrangement {@link UserStrategyIndicatorGroupResponse} gives a saved
- * strategy, so a builder form walks one shape whether it is drawing a blank
- * template or an existing strategy. A template's tree resolves to DISTINCT names,
+ * The same arrangement a saved strategy's {@code indicators[]} carries, so a
+ * builder form walks one shape whether it is drawing a blank template or an
+ * existing strategy. A template's tree resolves to DISTINCT names,
  * so a group here normally holds exactly one entry; {@link #usageCount} is the
  * number that varies - how many nodes of the tree name this indicator, which is
  * how many rows a strategy built from it will carry.

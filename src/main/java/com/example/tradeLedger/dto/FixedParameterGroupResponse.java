@@ -15,7 +15,8 @@ import java.util.List;
  * the same stance {@link UserStrategyGroupResponse} takes.
  *
  * Descriptors only: nothing here says what any strategy is set to. The
- * value-bearing counterpart is {@link StrategyFixedParameterGroupResponse}.
+ * value-bearing counterpart is the strategy response itself, whose flat fields
+ * carry the values these describe.
  */
 @Schema(name = "FixedParameterGroupResponse",
         description = """

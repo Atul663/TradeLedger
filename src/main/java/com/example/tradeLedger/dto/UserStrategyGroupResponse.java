@@ -27,8 +27,8 @@ import java.util.UUID;
 
                 The rows inside are the same UserStrategyResponse the flat list returns - the \
                 SAME objects, from the same mapper - so everything a flat row carries is here \
-                too: legs[], indicators[], indicatorGroups[], fixedParameters[], configHash, \
-                deployable. Grouping rearranges rows; it never edits one.""")
+                too: the configuration fields, indicators[], deployable, active. Grouping \
+                rearranges rows; it never edits one.""")
 public record UserStrategyGroupResponse(
 
         @Schema(description = "The template every strategy in this group runs.",

@@ -40,7 +40,8 @@ override of the configuration — only of size, risk profile and paper/live.
 
 **The dedup is invisible but worth surfacing.** Two users with the same indicator
 values on the same symbol and candle share one computation, whatever else differs.
-`configHash` and `sharedConfigId` are how you show it.
+`configHash` and `sharedConfigId` are how you show it - read them from
+`/my-strategies/{id}/runtime` or from a deployment, not from the strategy row.
 
 ### What is fixed and what is per-template
 
@@ -55,14 +56,14 @@ values on the same symbol and candle share one computation, whatever else differ
 So the builder form is built **once** by hand for everything except the indicator
 block, which is generated from each indicator's `paramSchema`.
 
-**Or generate all of it.** The template and strategy responses also carry the
-same content pre-arranged into form sections — `fixedParameters[]` grouped by
-`paramGroup` (Market, Instrument, Sizing, Exits), each field with its label,
-type, bounds and — on a saved strategy — its current value; and
-`indicatorGroups[]` grouped by indicator name. That is an **arrangement of the
-same fields**, not a second source of truth: every value in it is also a flat
-field, and a PUT still addresses the flat name. Hand-build the form or walk the
-groups — both read the same row.
+**Or generate all of it.** `GET /api/v1/fixed-parameters/grouped` returns the
+non-indicator fields already arranged into form sections — grouped by
+`paramGroup` (Market, Instrument, Sizing, Exits), each with its label, type and
+bounds — and the template response carries `indicatorGroups[]` for the indicator
+block. Those are descriptors only: a saved strategy carries each **value** as a
+flat field of the same `name`, so the form fills itself by matching `name` to
+field, and a PUT writes back under that same name. Fetch the descriptors once per
+page, not once per strategy.
 
 ---
 
@@ -122,7 +123,7 @@ type ExecutionMode = 'FIXED_QTY' | 'CAPITAL_PERCENT' | 'RISK_PERCENT';
 type InstanceStatus= 'active' | 'retired';
 type InstrumentType= 'spot' | 'future' | 'option' | 'index';
 type ParamType     = 'int' | 'decimal' | 'bool' | 'enum' | 'text';        // indicator paramSchema
-type FixedType     = ParamType | 'timeframe' | 'symbol' | 'exchange';     // fixedParameters[].dataType
+type FixedType     = ParamType | 'timeframe' | 'symbol' | 'exchange';     // /fixed-parameters dataType
 
 const STRIKE_OFFSETS = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15];   // ITM and OTM
 ```
@@ -203,8 +204,10 @@ PUT /api/v1/my-strategies/{id}
 
 Only what changed. Warn the user that every deployment follows.
 
-Watch `configHash` in the response: when it changes, the strategy moved to a
-different shared computation. Nothing broke — do not show a scary message.
+A retune that touches the signal params moves the strategy to a different shared
+computation. Nothing broke — do not show a scary message. The PUT response does
+not report it; watch `configHash` on `/my-strategies/{id}/runtime` if you want to
+show it.
 
 ---
 
@@ -248,10 +251,11 @@ how many tuning rows a strategy built from this template will carry**, so a
 template naming EMA twice gives `usageCount: 2` and the strategy gets two.
 
 `fixedParameters[]` is the platform's fixed knobs, grouped by `paramGroup` and
-ordered the way a form lays them out. Descriptors only here — a template holds no
-values. They are the same sections, in the same order, that
-`GET /api/v1/my-strategies/{id}` returns with values filled in, so one form draws
-a blank template and a saved strategy alike.
+ordered the way a form lays them out. Descriptors only — a template holds no
+values, and neither does this shape. They are the same sections
+`GET /api/v1/fixed-parameters/grouped` returns, so one form draws a blank template
+and a saved strategy alike: reopened on a strategy, each field takes its value
+from the flat field of the same `name` (see 5.3).
 
 #### Rendering an indicator input from `paramSchema`
 
@@ -319,20 +323,16 @@ twice.
 
 ```json
 {
-  "id": "…", "userId": "…",
-  "strategyId": "…", "strategyName": "EMA Averaging", "strategyDescription": "…",
-  "strategySystem": true,
+  "id": "…",
+  "strategyId": "…", "strategyName": "EMA Averaging",
   "name": "NIFTY 21/9 both sides", "description": null,
 
-  "symbolId": "…", "symbol": "NIFTY",
-  "instrumentType": "index", "exchangeCode": "NSE",
+  "symbol": "NIFTY", "exchangeCode": "NSE",
   "candleDuration": "5m", "triggerDuration": "5m",
 
   "derivative": "OPTION",
   "ceEnabled": true, "ceMoneyness": "OTM", "ceStrikeOffset": 1,
   "peEnabled": true, "peMoneyness": "ATM", "peStrikeOffset": 0,
-  "legs": [ { "side":"CE", "moneyness":"OTM", "strikeOffset":1, "label":"CE OTM1" },
-            { "side":"PE", "moneyness":"ATM", "strikeOffset":0, "label":"PE ATM" } ],
 
   "lotRule": "DOUBLE", "baseLot": 65, "averagingCount": 2,
   "slPct": 1.50, "tpPct": 3.00,
@@ -344,56 +344,43 @@ twice.
       "paramSchema": { "k": {"type":"int","min":1,"max":300,"default":21},
                        "d": {"type":"int","min":1,"max":300,"default":9,"lt":"k"} } } ],
 
-  "indicatorGroups": [ {
-      "indicatorId": "…", "indicatorName": "EMA Averaging",
-      "count": 1, "enabled": true,
-      "schema": { "k": {…}, "d": {…} },
-      "indicators": [ { …the same row as above… } ] } ],
-
-  "fixedParameters": [ {
-      "paramGroup": "Exits", "count": 2,
-      "parameters": [
-        { "id": "…", "name": "slPct", "label": "SL %",
-          "dataType": "decimal", "scope": "execution",
-          "value": 1.50,
-          "defaultValue": "2.5", "validation": {"min":0,"max":100},
-          "displayOrder": 1, "required": false },
-        { "name": "tpPct", "label": "TP %", "value": 3.00, … } ] },
-    { "paramGroup": "Instrument", "count": 7, "parameters": [ … ] },
-    { "paramGroup": "Market",     "count": 2, "parameters": [ … ] },
-    { "paramGroup": "Sizing",     "count": 3, "parameters": [ … ] } ],
-
-  "sharedConfigId": "…", "configHash": "a3f1…",
-  "deployable": true, "deploymentCount": 3,
-  "active": true, "createdAt": "…", "updatedAt": "…"
+  "deployable": true, "active": true,
+  "createdAt": "…", "updatedAt": "…"
 }
 ```
 
-Two views of the same choice, on purpose:
+**One arrangement, and it is the one you write back.** Every setting is a flat
+field under the same name the request takes, so a round trip is
+edit-one-field-and-PUT-it-back. `deployable` is false until symbol and candle are
+set — use it to gate the deploy button.
 
-- the `ce*` / `pe*` fields are the **editable** form — same names as the request,
-  so a round trip is edit-one-field-and-PUT-it-back;
-- `legs[]` is the same thing **derived for display** — iterate it for a summary
-  line without reimplementing "CE OTM1" from three fields. It is read-only, and
-  for a `FUTURES` strategy it is a single `{"side":"FUTURES","label":"FUTURES"}`.
+`indicators[]` is one row per usage, in `displayOrder`. It reads as repeating
+look-alike rows only when a template names the same indicator twice, and `slot`
+is what tells those apart (`"fast"` / `"slow"`); group by `indicatorName` client-
+side if you want a section per indicator. `paramSchema` is on every row, so the
+form for a strategy can be drawn from the strategy alone.
 
-`deployable` is false until symbol and candle are set — use it to gate the deploy
-button. `deploymentCount` tells the user how many brokers an edit will move.
+#### What this response no longer carries
 
-**Three arrangements, one row.** `indicatorGroups[]` and `fixedParameters[]` are
-`indicators[]` and the flat `ce*`/`pe*`/`lotRule`/`slPct`… fields, rearranged for
-a form:
+It used to ship several re-arrangements of its own content, plus the ids behind
+the row. Nothing consumed them and a list of N strategies paid for all of them N
+times, so they were removed. If you were reading one:
 
-- `indicatorGroups[]` — one group per indicator name. It only differs from the
-  flat list when a template names the same indicator twice, which is exactly when
-  the flat list reads as repeating look-alike rows; `slot` tells the usages apart,
-  `enabled` on the group is true while **any** usage is. `schema` is hoisted to
-  the group because it belongs to the indicator, and is still on every row.
-- `fixedParameters[]` — one group per `paramGroup`, each field carrying its
-  descriptor (from `/api/v1/fixed-parameters`) **and** its `value` on this
-  strategy, already typed. The `Deployment` group is absent: those knobs are
-  columns on a subscription, not on a strategy, and they come back on
-  `/api/v1/my-subscriptions`.
+| Was | Now |
+| --- | --- |
+| `legs[]` | derive from `derivative` + the `ce*` / `pe*` fields, or read the bot shape (5.4) |
+| `indicatorGroups[]` | group `indicators[]` by `indicatorName` |
+| `fixedParameters[]` | `GET /api/v1/fixed-parameters/grouped` for the descriptors; each one's value is the flat field of the same `name` |
+| `sharedConfigId`, `configHash` | the bot shape (5.4), or a deployment on `/api/v1/my-subscriptions` |
+| `deploymentCount` | `GET /api/v1/my-subscriptions` once for the page, counted by `userStrategyId` |
+| `strategyDescription`, `strategySystem` | the group heading on `/grouped`, or `/api/v1/strategy-templates` |
+| `userId` | the caller is the owner; every row here is theirs |
+| `symbolId`, `instrumentType` | `GET /api/v1/symbols` — `exchangeCode` + `symbol` identify the row |
+
+**Binding a descriptor to a field.** `/api/v1/fixed-parameters` names each knob
+after the field it describes, so the join is string equality: the descriptor
+`slPct` renders the `slPct` field, and the PUT writes `slPct`. The descriptors are
+identical for every strategy, so fetch them once per page.
 
 **The `symbol` knob renders itself.** It sits first in the `Market` group with
 `dataType: "symbol"`, and its `validation.options` is the live list of active
@@ -403,7 +390,7 @@ newly listed instrument shows up without a deploy. Render it as a select like an
 
 ```json
 { "name": "symbol", "label": "Underlying", "dataType": "symbol",
-  "scope": "signal", "required": true, "value": "NIFTY",
+  "scope": "signal", "required": true,
   "validation": { "options": ["BANKNIFTY", "NIFTY"],
                   "optionsSource": "/api/v1/symbols" },
   "displayOrder": 0 }
@@ -411,15 +398,15 @@ newly listed instrument shows up without a deploy. Render it as a select like an
 
 Tickers, not ids — because `symbol` is what a PUT carries. **A ticker is unique
 per exchange, not globally**, so one listed on two venues appears in the list
-once. `value` is `null` until a market is chosen, which is the state
-`deployable: false` describes.
+once. The strategy's own `symbol` field is `null` until a market is chosen, which
+is the state `deployable: false` describes.
 
 **The `exchangeCode` knob sits before it**, same mechanism, over the active
 `exchanges`:
 
 ```json
 { "name": "exchangeCode", "label": "Exchange", "dataType": "exchange",
-  "scope": "signal", "required": true, "value": "NSE",
+  "scope": "signal", "required": true,
   "validation": { "options": ["BSE", "NSE"],
                   "optionsSource": "/api/v1/exchanges" },
   "displayOrder": 0 }
@@ -431,10 +418,10 @@ is the pair the API identifies an instrument by. Sending `symbol` alone is a 400
 its own is the alternative. A disabled venue is not offered, since a symbol on one
 cannot be saved.
 
-**Write with the flat names.** These are read shapes. `PUT` takes `slPct`, not a
-group entry — see 5.2. And if the descriptor catalog is empty or a knob has been
-deactivated, `fixedParameters[]` shrinks or empties while the flat fields stay
-exactly as they were.
+**Write with the flat names.** `PUT` takes `slPct` — see 5.2. And if the
+descriptor catalog is empty or a knob has been deactivated, the form loses that
+field while the strategy's own value stays exactly as it was: the descriptors
+decide what is rendered, never what is stored.
 
 ### 5.4 `GET /api/v1/my-strategies/{id}/runtime` — the bot shape
 

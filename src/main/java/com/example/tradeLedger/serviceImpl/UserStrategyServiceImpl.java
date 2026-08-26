@@ -6,7 +6,6 @@ import com.example.tradeLedger.dto.StrategySubscriptionRequest;
 import com.example.tradeLedger.dto.StrategySubscriptionResponse;
 import com.example.tradeLedger.dto.UserStrategyBulkDeleteResponse;
 import com.example.tradeLedger.dto.UserStrategyGroupResponse;
-import com.example.tradeLedger.dto.UserStrategyIndicatorGroupResponse;
 import com.example.tradeLedger.dto.UserStrategyIndicatorResponse;
 import com.example.tradeLedger.dto.UserStrategyRequest;
 import com.example.tradeLedger.dto.UserStrategyResponse;
@@ -76,7 +75,6 @@ public class UserStrategyServiceImpl implements UserStrategyService {
     private final UserStrategyValidator validator;
     private final SymbolResolver symbolResolver;
     private final RuleTrees ruleTrees;
-    private final StrategyFixedParameters fixedParameters;
     private final JsonSupport json;
 
     public UserStrategyServiceImpl(CurrentUserService currentUserService,
@@ -94,7 +92,6 @@ public class UserStrategyServiceImpl implements UserStrategyService {
                                    UserStrategyValidator validator,
                                    SymbolResolver symbolResolver,
                                    RuleTrees ruleTrees,
-                                   StrategyFixedParameters fixedParameters,
                                    JsonSupport json) {
         this.currentUserService = currentUserService;
         this.userStrategyRepository = userStrategyRepository;
@@ -111,7 +108,6 @@ public class UserStrategyServiceImpl implements UserStrategyService {
         this.validator = validator;
         this.symbolResolver = symbolResolver;
         this.ruleTrees = ruleTrees;
-        this.fixedParameters = fixedParameters;
         this.json = json;
     }
 
@@ -121,8 +117,7 @@ public class UserStrategyServiceImpl implements UserStrategyService {
     @Transactional(readOnly = true)
     public List<UserStrategyResponse> list(String email, Boolean active, UUID strategyId) {
         List<UserStrategy> rows = ownedRows(email, active, strategyId);
-        Batch batch = Batch.of(rows, indicatorRowRepository, subscriptionRepository,
-                fixedParameters);
+        Batch batch = Batch.of(rows, indicatorRowRepository);
         return rows.stream().map(row -> toResponse(row, batch)).toList();
     }
 
@@ -130,8 +125,7 @@ public class UserStrategyServiceImpl implements UserStrategyService {
     @Transactional(readOnly = true)
     public List<UserStrategyGroupResponse> listGrouped(String email, Boolean active, UUID strategyId) {
         List<UserStrategy> rows = ownedRows(email, active, strategyId);
-        Batch batch = Batch.of(rows, indicatorRowRepository, subscriptionRepository,
-                fixedParameters);
+        Batch batch = Batch.of(rows, indicatorRowRepository);
 
         // Insertion-ordered so the rows inside each group keep the flat list's
         // oldest-first order; the GROUPS are then sorted by the name they are
@@ -176,30 +170,25 @@ public class UserStrategyServiceImpl implements UserStrategyService {
     }
 
     /**
-     * Everything a list response needs that would otherwise be fetched per row.
+     * The one thing a list response needs that would otherwise be fetched per
+     * row: each strategy's indicator usages.
      *
-     * A response over N strategies asks the same three questions N times - what
-     * are this row's indicators, how many deployments has it, and what does the
-     * fixed-knob form look like - and only the first has a different answer per
-     * row. Asking per row is a database round trip per row; on a remote database
-     * that is the whole latency of the endpoint. This asks once.
+     * A response over N strategies asks the same question N times, and asking per
+     * row is a database round trip per row; on a remote database that is the
+     * whole latency of the endpoint. This asks once.
      *
      * Built from the rows the response is about, so it never holds more than the
      * request needs, and discarded with the response.
      */
-    private record Batch(Map<UUID, List<UserStrategyIndicator>> indicatorRows,
-                         Map<UUID, Long> deploymentCounts,
-                         StrategyFixedParameters.Snapshot fixedParameters) {
+    private record Batch(Map<UUID, List<UserStrategyIndicator>> indicatorRows) {
 
         static Batch of(List<UserStrategy> rows,
-                        UserStrategyIndicatorRepository indicatorRowRepository,
-                        StrategySubscriptionRepository subscriptionRepository,
-                        StrategyFixedParameters fixedParameters) {
+                        UserStrategyIndicatorRepository indicatorRowRepository) {
             List<UUID> ids = rows.stream().map(UserStrategy::getId).toList();
             if (ids.isEmpty()) {
-                // No rows means no questions to ask - and an empty IN () is a
+                // No rows means no question to ask - and an empty IN () is a
                 // query some databases refuse outright.
-                return new Batch(Map.of(), Map.of(), fixedParameters.snapshot());
+                return new Batch(Map.of());
             }
 
             Map<UUID, List<UserStrategyIndicator>> byStrategy = new LinkedHashMap<>();
@@ -208,17 +197,11 @@ public class UserStrategyServiceImpl implements UserStrategyService {
                 byStrategy.computeIfAbsent(row.getUserStrategy().getId(), key -> new ArrayList<>())
                         .add(row);
             }
-            return new Batch(byStrategy,
-                    counts(subscriptionRepository.countByUserStrategyIds(ids)),
-                    fixedParameters.snapshot());
+            return new Batch(byStrategy);
         }
 
         List<UserStrategyIndicator> indicatorsOf(UserStrategy strategy) {
             return indicatorRows.getOrDefault(strategy.getId(), List.of());
-        }
-
-        long deploymentsOf(UserStrategy strategy) {
-            return deploymentCounts.getOrDefault(strategy.getId(), 0L);
         }
     }
 
@@ -871,23 +854,14 @@ public class UserStrategyServiceImpl implements UserStrategyService {
 
     /** The single-strategy path: a batch of one, so there is one mapper, not two. */
     private UserStrategyResponse toResponse(UserStrategy strategy) {
-        return toResponse(strategy, Batch.of(List.of(strategy), indicatorRowRepository,
-                subscriptionRepository, fixedParameters));
+        return toResponse(strategy, Batch.of(List.of(strategy), indicatorRowRepository));
     }
 
     private UserStrategyResponse toResponse(UserStrategy strategy, Batch batch) {
         StrategyTemplate template = strategy.getStrategy();
         Symbol symbol = strategy.getSymbol();
-        SharedStrategyConfig config = strategy.getSharedConfig();
 
         List<UserStrategyIndicatorResponse> indicators = new ArrayList<>();
-        // Grouped in the SAME pass that builds the flat list, and holding the very
-        // same objects: the two arrangements cannot end up disagreeing about a row
-        // because there is only one row. Keyed by name rather than by id, because
-        // the name is what the group is tagged with.
-        Map<String, Indicator> groupIndicator = new LinkedHashMap<>();
-        Map<String, List<UserStrategyIndicatorResponse>> byName = new LinkedHashMap<>();
-
         for (UserStrategyIndicator row : batch.indicatorsOf(strategy)) {
             Indicator indicator = row.getIndicator();
             UserStrategyIndicatorResponse usage = new UserStrategyIndicatorResponse(
@@ -900,34 +874,15 @@ public class UserStrategyServiceImpl implements UserStrategyService {
                     json.toMap(row.getParams()),
                     json.toMap(indicator.getParamSchema()));
             indicators.add(usage);
-            groupIndicator.putIfAbsent(indicator.getName(), indicator);
-            byName.computeIfAbsent(indicator.getName(), key -> new ArrayList<>()).add(usage);
         }
-
-        List<UserStrategyIndicatorGroupResponse> indicatorGroups = new ArrayList<>();
-        byName.forEach((name, usages) -> {
-            Indicator indicator = groupIndicator.get(name);
-            indicatorGroups.add(new UserStrategyIndicatorGroupResponse(
-                    indicator.getId(),
-                    name,
-                    usages.size(),
-                    usages.stream().anyMatch(UserStrategyIndicatorResponse::enabled),
-                    json.toMap(indicator.getParamSchema()),
-                    usages));
-        });
 
         return new UserStrategyResponse(
                 strategy.getId(),
-                strategy.getUser().getId(),
                 template.getId(),
                 template.getName(),
-                template.getDescription(),
-                template.isSystem(),
                 strategy.getName(),
                 strategy.getDescription(),
-                symbol != null ? symbol.getId() : null,
                 symbol != null ? symbol.getSymbol() : null,
-                symbol != null ? symbol.getInstrumentType() : null,
                 symbol != null ? symbol.getExchange().getCode() : null,
                 strategy.getCandleDuration(),
                 strategy.getTriggerDuration(),
@@ -938,19 +893,13 @@ public class UserStrategyServiceImpl implements UserStrategyService {
                 strategy.isPeEnabled(),
                 strategy.getPeMoneyness() != null ? strategy.getPeMoneyness().name() : null,
                 strategy.getPeStrikeOffset(),
-                validator.legs(strategy),
                 strategy.getLotRule().name(),
                 strategy.getBaseLot(),
                 strategy.getAveragingCount(),
                 strategy.getSlPct(),
                 strategy.getTpPct(),
                 indicators,
-                indicatorGroups,
-                batch.fixedParameters().forStrategy(strategy),
-                config != null ? config.getId() : null,
-                config != null ? config.getConfigHash() : null,
                 strategy.isDeployable(),
-                batch.deploymentsOf(strategy),
                 strategy.isActive(),
                 strategy.getCreatedAt(),
                 strategy.getUpdatedAt());

@@ -97,7 +97,6 @@ class UserStrategyGroupingTest {
                 mock(UserStrategyValidator.class),
                 mock(SymbolResolver.class),
                 mock(RuleTrees.class),
-                IndicatorGroupingTest.emptyFixedParameters(),
                 new JsonSupport(new ObjectMapper()));
     }
 
@@ -228,7 +227,7 @@ class UserStrategyGroupingTest {
      * and it is a fact about the TEMPLATE, not about the caller's own row.
      */
     @Test
-    void everyRowAndItsHeadingCarryTheTemplatesSystemFlag() {
+    void eachHeadingCarriesTheTemplatesSystemFlag() {
         StrategyTemplate seeded = template(AVERAGING_ID, "EMA Averaging", true);
         StrategyTemplate authored = template(CROSSOVER_ID, "EMA Crossover", false);
         when(strategies.findByUser_IdOrderByCreatedAtAsc(USER_ID)).thenReturn(List.of(
@@ -239,9 +238,10 @@ class UserStrategyGroupingTest {
 
         assertTrue(groups.get(0).strategySystem(), "EMA Averaging is seeded");
         assertFalse(groups.get(1).strategySystem(), "EMA Crossover was published through the API");
-        groups.forEach(group -> group.strategies().forEach(row ->
-                assertEquals(group.strategySystem(), row.strategySystem(),
-                        "a heading and its rows cannot disagree about the template")));
+        // The flag lives on the heading alone. The rows used to repeat it, once
+        // per row, for a fact that is the same for the whole group.
+        groups.forEach(group -> assertFalse(group.strategies().isEmpty(),
+                "a heading with no rows under it is not a group"));
     }
 
     /**
@@ -272,6 +272,10 @@ class UserStrategyGroupingTest {
      * The whole point of batching: a list response asks each question ONCE,
      * however many strategies it covers. Asking per row is a database round trip
      * per row, which is what made this endpoint slow.
+     *
+     * The deployment count is not asked at all any more - it was read for a
+     * {@code deploymentCount} field nothing consumed, so a list of N strategies
+     * paid for a GROUP BY over the subscription table on every request.
      */
     @Test
     void aListAsksForIndicatorsAndCountsOncePerRequestNotOncePerStrategy() {
@@ -285,7 +289,7 @@ class UserStrategyGroupingTest {
 
         verify(indicatorRows, times(1))
                 .findByUserStrategy_IdInOrderByUserStrategy_IdAscDisplayOrderAsc(any());
-        verify(subscriptions, times(1)).countByUserStrategyIds(any());
+        verify(subscriptions, never()).countByUserStrategyIds(any());
         verify(sharedConfigs, times(1)).countByStrategyIds(any());
         verify(indicatorRows, never()).findByUserStrategy_IdOrderByDisplayOrderAsc(any());
     }

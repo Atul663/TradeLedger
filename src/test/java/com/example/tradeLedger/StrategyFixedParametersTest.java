@@ -1,15 +1,11 @@
 package com.example.tradeLedger;
 
 import com.example.tradeLedger.dto.FixedParameterGroupResponse;
-import com.example.tradeLedger.dto.StrategyFixedParameterGroupResponse;
-import com.example.tradeLedger.dto.StrategyFixedParameterResponse;
-import com.example.tradeLedger.entity.Derivative;
+import com.example.tradeLedger.dto.FixedParameterResponse;
+import com.example.tradeLedger.dto.UserStrategyResponse;
 import com.example.tradeLedger.entity.Exchange;
 import com.example.tradeLedger.entity.FixedParameter;
-import com.example.tradeLedger.entity.LotRule;
-import com.example.tradeLedger.entity.Moneyness;
 import com.example.tradeLedger.entity.Symbol;
-import com.example.tradeLedger.entity.UserStrategy;
 import com.example.tradeLedger.repository.FixedParameterRepository;
 import com.example.tradeLedger.repository.ExchangeRepository;
 import com.example.tradeLedger.repository.SymbolRepository;
@@ -20,30 +16,33 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.math.BigDecimal;
+import java.lang.reflect.RecordComponent;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * The fixed knobs arranged as a form: descriptors from the catalog, values from
- * the strategy's own columns, folded into sections.
+ * The fixed knobs a strategy can carry, arranged as the sections a form draws.
  *
  * Two things are worth pinning, because neither is recomputable from either side
- * alone. The first is the JOIN - a descriptor called 'slPct' has to come back
- * carrying {@code user_strategies.sl_pct} and not some other column's number,
- * and nothing in the schema enforces that pairing. The second is which
- * descriptors take part at all: the deployment ones describe subscription
- * columns, so a strategy that reported them would be claiming settings it does
- * not have.
+ * alone. The first is WHICH descriptors take part: the deployment ones describe
+ * subscription columns, so a strategy form offering them would be promising
+ * settings the row has nowhere to keep. The second is the OPTIONS - the symbol
+ * and exchange knobs have no fixed choice list, they read one from the tables, and
+ * a form that got an empty select could not pick a market at all.
+ *
+ * Values are not part of this shape. They are flat fields on the strategy
+ * response, which a form binds to by descriptor name - the last test here is what
+ * keeps those two lists from drifting apart.
  */
 class StrategyFixedParametersTest {
 
@@ -122,116 +121,62 @@ class StrategyFixedParametersTest {
         return parameter;
     }
 
-    private static UserStrategy strategy() {
-        UserStrategy strategy = new UserStrategy();
-        strategy.setSymbol(symbol("NIFTY"));
-        strategy.setCandleDuration("5m");
-        strategy.setTriggerDuration("1m");
-        strategy.setDerivative(Derivative.OPTION);
-        strategy.setCeEnabled(true);
-        strategy.setCeMoneyness(Moneyness.OTM);
-        strategy.setCeStrikeOffset(3);
-        strategy.setLotRule(LotRule.DOUBLE);
-        strategy.setBaseLot(65);
-        strategy.setSlPct(new BigDecimal("1.50"));
-        return strategy;
-    }
-
-    private static Map<String, StrategyFixedParameterResponse> byName(
-            List<StrategyFixedParameterGroupResponse> groups) {
+    private static Map<String, FixedParameterResponse> byName(
+            List<FixedParameterGroupResponse> groups) {
         return groups.stream()
                 .flatMap(group -> group.parameters().stream())
-                .collect(java.util.stream.Collectors.toMap(
-                        StrategyFixedParameterResponse::name, Function.identity()));
+                .collect(Collectors.toMap(FixedParameterResponse::name, Function.identity()));
     }
 
     @Test
     void groupsTheKnobsByParamGroupInCatalogOrder() {
         seedCatalog();
 
-        List<StrategyFixedParameterGroupResponse> groups = fixedParameters.forStrategy(strategy());
+        List<FixedParameterGroupResponse> groups = fixedParameters.descriptors();
 
         assertEquals(List.of("Exits", "Instrument", "Market", "Sizing"),
-                groups.stream().map(StrategyFixedParameterGroupResponse::paramGroup).toList(),
+                groups.stream().map(FixedParameterGroupResponse::paramGroup).toList(),
                 "the sections come back in the order the catalog is read in");
         assertEquals(List.of("slPct", "tpPct"),
-                groups.get(0).parameters().stream()
-                        .map(StrategyFixedParameterResponse::name).toList(),
+                groups.get(0).parameters().stream().map(FixedParameterResponse::name).toList(),
                 "and the rows inside keep their displayOrder");
         groups.forEach(group -> assertEquals(group.count(), group.parameters().size(),
                 "the count and the rows must agree"));
     }
 
     /**
-     * The join by name is the whole point of the shape, and nothing in the schema
-     * enforces it - a descriptor wired to the wrong getter would render a form
-     * that silently shows one field's value under another's label.
-     */
-    @Test
-    void eachDescriptorCarriesTheValueOfTheColumnItNames() {
-        seedCatalog();
-
-        Map<String, StrategyFixedParameterResponse> knobs = byName(
-                fixedParameters.forStrategy(strategy()));
-
-        assertEquals("5m", knobs.get("candleDuration").value());
-        assertEquals("1m", knobs.get("triggerDuration").value());
-        assertEquals("OPTION", knobs.get("derivative").value());
-        assertEquals(true, knobs.get("ceEnabled").value());
-        assertEquals("OTM", knobs.get("ceMoneyness").value());
-        assertEquals(3, knobs.get("ceStrikeOffset").value());
-        assertEquals("DOUBLE", knobs.get("lotRule").value());
-        assertEquals(65, knobs.get("baseLot").value());
-        assertEquals(new BigDecimal("1.50"), knobs.get("slPct").value());
-    }
-
-    /** An unset column is null, not the descriptor's suggested default. */
-    @Test
-    void anUnsetColumnComesBackNull() {
-        seedCatalog();
-
-        Map<String, StrategyFixedParameterResponse> knobs = byName(
-                fixedParameters.forStrategy(strategy()));
-
-        assertNull(knobs.get("tpPct").value(), "the strategy carries no take profit");
-        assertNotNull(knobs.get("slPct").value(), "but it does carry a stop");
-    }
-
-    /**
      * The deployment knobs describe subscription columns. A strategy has no such
-     * column to read, so reporting one would be inventing a setting.
+     * column behind them, so offering one would be inventing a setting.
      */
     @Test
     void theDeploymentGroupIsNotAStrategySection() {
         seedCatalog();
 
-        List<StrategyFixedParameterGroupResponse> groups = fixedParameters.forStrategy(strategy());
+        List<FixedParameterGroupResponse> groups = fixedParameters.descriptors();
 
         assertTrue(groups.stream().noneMatch(group -> "Deployment".equals(group.paramGroup())),
                 "a strategy does not carry the deployment knobs");
         assertTrue(byName(groups).keySet().stream().allMatch(StrategyFixedParameters.knobNames()::contains),
-                "only knobs this class knows how to read appear");
+                "only knobs this class recognizes appear");
     }
 
     // ------------------------------------------------------- the symbol knob
 
     /**
-     * The one knob whose choices are rows. Nothing is stored for it, so if the
-     * read path did not fill the list the form would render an empty select and
-     * the user could not pick a market at all.
+     * The one knob whose choices are rows. Nothing is stored for it, so if the read
+     * path did not fill the list the form would render an empty select and the user
+     * could not pick a market at all.
      */
     @Test
     void theSymbolKnobIsOfferedTheActiveSymbolsFromTheTable() {
         seedCatalog();
 
-        StrategyFixedParameterResponse knob = byName(fixedParameters.forStrategy(strategy()))
-                .get("symbol");
+        FixedParameterResponse knob = byName(fixedParameters.descriptors()).get("symbol");
 
         assertEquals(FixedParameter.TYPE_SYMBOL, knob.dataType());
         assertEquals(List.of("BANKNIFTY", "NIFTY"), knob.validation().get("options"),
                 "the tickers, in the order the table returns them");
         assertEquals("/api/v1/symbols", knob.validation().get("optionsSource"));
-        assertEquals("NIFTY", knob.value(), "the ticker, matching the vocabulary of its options");
     }
 
     /**
@@ -243,14 +188,12 @@ class StrategyFixedParametersTest {
     void theExchangeKnobIsOfferedTheActiveExchangesFromTheTable() {
         seedCatalog();
 
-        StrategyFixedParameterResponse knob = byName(fixedParameters.forStrategy(strategy()))
-                .get("exchangeCode");
+        FixedParameterResponse knob = byName(fixedParameters.descriptors()).get("exchangeCode");
 
         assertEquals(FixedParameter.TYPE_EXCHANGE, knob.dataType());
         assertEquals(List.of("BSE", "NSE"), knob.validation().get("options"),
                 "the codes, in the order the table returns them");
         assertEquals("/api/v1/exchanges", knob.validation().get("optionsSource"));
-        assertEquals("NSE", knob.value(), "read through the strategy's symbol, which has the venue");
     }
 
     /** A disabled venue cannot carry a saveable symbol, so it is not offered. */
@@ -261,23 +204,7 @@ class StrategyFixedParametersTest {
                 .thenReturn(List.of(exchange("NSE")));
 
         assertEquals(List.of("NSE"),
-                byName(fixedParameters.forStrategy(strategy())).get("exchangeCode").validation()
-                        .get("options"));
-    }
-
-    /** No market yet means no venue to report - the same state symbol is in. */
-    @Test
-    void aStrategyWithNoMarketReportsANullExchange() {
-        seedCatalog();
-        UserStrategy blank = strategy();
-        blank.setSymbol(null);
-
-        StrategyFixedParameterResponse knob = byName(fixedParameters.forStrategy(blank))
-                .get("exchangeCode");
-
-        assertNull(knob.value());
-        assertEquals(List.of("BSE", "NSE"), knob.validation().get("options"),
-                "there is still a list to pick from");
+                byName(fixedParameters.descriptors()).get("exchangeCode").validation().get("options"));
     }
 
     /** The venue narrows the instrument, so a form has to draw it first. */
@@ -285,10 +212,10 @@ class StrategyFixedParametersTest {
     void theVenueIsOrderedBeforeTheInstrument() {
         seedCatalog();
 
-        List<String> market = fixedParameters.forStrategy(strategy()).stream()
+        List<String> market = fixedParameters.descriptors().stream()
                 .filter(group -> "Market".equals(group.paramGroup()))
                 .flatMap(group -> group.parameters().stream())
-                .map(StrategyFixedParameterResponse::name)
+                .map(FixedParameterResponse::name)
                 .toList();
 
         assertEquals(List.of("exchangeCode", "symbol", "candleDuration", "triggerDuration"), market);
@@ -302,8 +229,7 @@ class StrategyFixedParametersTest {
                 symbol("BANKNIFTY"), symbol("FINNIFTY"), symbol("NIFTY")));
 
         assertEquals(List.of("BANKNIFTY", "FINNIFTY", "NIFTY"),
-                byName(fixedParameters.forStrategy(strategy())).get("symbol").validation()
-                        .get("options"));
+                byName(fixedParameters.descriptors()).get("symbol").validation().get("options"));
     }
 
     /**
@@ -318,23 +244,7 @@ class StrategyFixedParametersTest {
                 symbol("NIFTY"), symbol("NIFTY")));
 
         assertEquals(List.of("NIFTY"),
-                byName(fixedParameters.forStrategy(strategy())).get("symbol").validation()
-                        .get("options"));
-    }
-
-    /** A strategy saved on template defaults has no market yet - that is not an error. */
-    @Test
-    void aStrategyWithNoMarketReportsANullSymbolAndStillGetsTheOptions() {
-        seedCatalog();
-        UserStrategy blank = strategy();
-        blank.setSymbol(null);
-
-        StrategyFixedParameterResponse knob = byName(fixedParameters.forStrategy(blank))
-                .get("symbol");
-
-        assertNull(knob.value());
-        assertEquals(List.of("BANKNIFTY", "NIFTY"), knob.validation().get("options"),
-                "there is still a list to pick from");
+                byName(fixedParameters.descriptors()).get("symbol").validation().get("options"));
     }
 
     /** The bounds a form enforces come back as a map, not as the stored JSON string. */
@@ -342,35 +252,12 @@ class StrategyFixedParametersTest {
     void validationIsCarriedAsAMap() {
         seedCatalog();
 
-        StrategyFixedParameterResponse slPct = byName(fixedParameters.forStrategy(strategy()))
-                .get("slPct");
+        Map<String, FixedParameterResponse> knobs = byName(fixedParameters.descriptors());
 
-        assertEquals(0, slPct.validation().get("min"));
-        assertEquals(100, slPct.validation().get("max"));
-        assertTrue(byName(fixedParameters.forStrategy(strategy())).get("tpPct").validation().isEmpty(),
+        assertEquals(0, knobs.get("slPct").validation().get("min"));
+        assertEquals(100, knobs.get("slPct").validation().get("max"));
+        assertTrue(knobs.get("tpPct").validation().isEmpty(),
                 "an unbounded knob gets an empty map, not a null");
-    }
-
-    /**
-     * A template has no values, so it gets the same sections empty-handed - and it
-     * has to be the SAME sections, or a form drawing a blank template and the same
-     * form reopened on a saved strategy would disagree about which fields exist.
-     */
-    @Test
-    void theDescriptorOnlyShapeHoldsTheSameSectionsAndFields() {
-        seedCatalog();
-
-        List<FixedParameterGroupResponse> descriptors = fixedParameters.descriptors();
-        List<StrategyFixedParameterGroupResponse> withValues = fixedParameters.forStrategy(strategy());
-
-        assertEquals(
-                withValues.stream().map(StrategyFixedParameterGroupResponse::paramGroup).toList(),
-                descriptors.stream().map(FixedParameterGroupResponse::paramGroup).toList());
-        assertEquals(
-                withValues.stream().flatMap(g -> g.parameters().stream())
-                        .map(StrategyFixedParameterResponse::name).toList(),
-                descriptors.stream().flatMap(g -> g.parameters().stream())
-                        .map(com.example.tradeLedger.dto.FixedParameterResponse::name).toList());
     }
 
     /** Emptying the catalog costs the arrangement and nothing else. */
@@ -379,7 +266,30 @@ class StrategyFixedParametersTest {
         when(catalog.findByActiveOrderByParamGroupAscDisplayOrderAscNameAsc(true))
                 .thenReturn(List.of());
 
-        assertTrue(fixedParameters.forStrategy(strategy()).isEmpty());
         assertTrue(fixedParameters.descriptors().isEmpty());
+    }
+
+    /**
+     * The pairing nothing else enforces.
+     *
+     * A form binds a descriptor to a strategy field by string equality on
+     * {@code name}, so a knob whose name matches no field on the response renders
+     * an input that reads nothing and writes nowhere. The strategy response used to
+     * carry the values itself, which made the mismatch impossible; now the two
+     * shapes are independent, and this is what keeps them honest.
+     */
+    @Test
+    void everyKnobNamesAFieldTheStrategyResponseCarries() {
+        Set<String> fields = Arrays.stream(UserStrategyResponse.class.getRecordComponents())
+                .map(RecordComponent::getName)
+                .collect(Collectors.toSet());
+
+        List<String> orphans = StrategyFixedParameters.knobNames().stream()
+                .filter(knob -> !fields.contains(knob))
+                .sorted()
+                .toList();
+
+        assertTrue(orphans.isEmpty(),
+                "knobs with no field on UserStrategyResponse to bind to: " + orphans);
     }
 }

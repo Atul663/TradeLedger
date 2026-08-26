@@ -80,9 +80,9 @@ public class UserStrategyController extends SecuredController {
                     caller's rows).
 
                     **The rows are complete.** Each entry in `strategies[]` is the identical \
-                    `UserStrategyResponse` the flat list returns - `legs[]`, `indicators[]`, \
-                    `indicatorGroups[]`, `fixedParameters[]`, `configHash`, `deployable` and \
-                    all. There is one mapper behind both shapes, so they cannot drift.""")
+                    `UserStrategyResponse` the flat list returns - the configuration fields, \
+                    `indicators[]`, `deployable`, `active` and all. There is one mapper behind \
+                    both shapes, so they cannot drift.""")
     public List<UserStrategyGroupResponse> listGrouped(
             @Parameter(description = "true for live, false for archived, omit for all")
             @RequestParam(required = false) Boolean active,
@@ -95,8 +95,8 @@ public class UserStrategyController extends SecuredController {
 
     @GetMapping("/{id}")
     @Operation(summary = "Get one strategy: every setting, plus each indicator's schema",
-            description = "The editor shape. The ce*/pe* fields are what you PUT back; legs[] is "
-                    + "the same choice derived for display.")
+            description = "The editor shape: every field flat, under the same name the request "
+                    + "takes, so a round trip is edit-one-field-and-PUT-it-back.")
     public UserStrategyResponse get(@PathVariable UUID id) {
         String email = currentEmail();
         log.info("GET strategy={} | user={}", id, email);
@@ -207,8 +207,8 @@ public class UserStrategyController extends SecuredController {
                     examples = {
                             @ExampleObject(name = "Retune the indicator",
                                     description = "params is MERGED, so d keeps its value. This "
-                                            + "changes configHash and moves the strategy to a "
-                                            + "different shared computation.",
+                                            + "moves the strategy to a different shared "
+                                            + "computation.",
                                     value = """
                                             { "indicators": [
                                                 { "indicatorName": "EMA Averaging", "params": { "k": 50 } } ] }"""),

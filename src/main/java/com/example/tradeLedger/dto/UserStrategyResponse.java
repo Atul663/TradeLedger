@@ -8,30 +8,34 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * A saved strategy, in full: one call renders the whole editor.
+ * A saved strategy: one call renders the whole editor.
  *
  * The configuration arrives as the columns it is stored in - the same names the
- * request takes, so a round trip is edit-one-field-and-PUT-it-back. {@link #legs}
- * is the same instrument choice DERIVED for display, so a summary line does not
- * have to reimplement "CE OTM1" from three fields.
+ * request takes, so a round trip is edit-one-field-and-PUT-it-back. Each
+ * indicator carries its current values and the schema those values are validated
+ * against, so the form can render an input for a knob nobody hardcoded.
+ *
+ * <b>One arrangement, not several.</b> Earlier revisions also shipped the same
+ * content re-grouped for a form - {@code legs[]} derived from the CE and PE
+ * fields, {@code indicatorGroups[]} by indicator name, {@code fixedParameters[]}
+ * by paramGroup - along with the ids behind the row ({@code userId},
+ * {@code symbolId}, {@code sharedConfigId}, {@code configHash}). Every one of
+ * them was a second view of something already here, and nothing read them; a
+ * list response paid for all of them on every row. The flat fields below are the
+ * whole shape now.
  */
 @Schema(name = "UserStrategyResponse",
         description = """
-                One saved strategy, complete. The ce*/pe* fields are the EDITABLE form - the same \
-                names the request takes - while legs[] is the same choice derived for display. \
-                Each indicator carries both its current values and its schema, so the form can \
-                render an input for a knob nobody hardcoded.
+                One saved strategy. The ce*/pe* fields are the EDITABLE form - the same names the \
+                request takes - and each indicator carries both its current values and its \
+                schema, so the form can render an input for a knob nobody hardcoded.
 
-                indicatorGroups[] and fixedParameters[] are the same content ARRANGED for a \
-                form - by indicator name, and by paramGroup. Nothing is only there: every value \
-                in them is also a flat field, and a PUT addresses the flat name.""")
+                Flat only: there is one arrangement of the configuration, and a PUT addresses it \
+                by name.""")
 public record UserStrategyResponse(
 
         @Schema(example = "us000000-1111-4222-8333-444444444444")
         UUID id,
-
-        @Schema(example = "u0000000-1111-4222-8333-444444444444")
-        UUID userId,
 
         @Schema(description = "The template whose logic this runs.",
                 example = "3f1b0c7e-9a41-4c2e-9f11-2b7d5a6e8c01")
@@ -39,17 +43,6 @@ public record UserStrategyResponse(
 
         @Schema(example = "EMA Averaging")
         String strategyName,
-
-        @Schema(example = "EMA of the highs against a shorter signal leg, traded through options "
-                + "or the future, with a configurable averaging ladder.")
-        String strategyDescription,
-
-        @Schema(description = "Whether the TEMPLATE this runs is a seeded platform one. A system "
-                + "template is shared by every user and locked - it cannot be edited or deleted, "
-                + "so nothing about the logic behind this strategy can change under it. This "
-                + "strategy itself is the caller's either way, and stays fully editable.",
-                example = "true")
-        boolean strategySystem,
 
         @Schema(description = "The caller's own label.", example = "NIFTY 21/9 both sides")
         String name,
@@ -59,15 +52,8 @@ public record UserStrategyResponse(
 
         // ------------------------------------------------------------- market
 
-        @Schema(example = "1a2b3c4d-5e6f-4a8b-9c0d-1e2f3a4b5c6d")
-        UUID symbolId,
-
         @Schema(example = "NIFTY")
         String symbol,
-
-        @Schema(description = "The sheet's INDEX-vs-STOCK cell, read off the symbol.",
-                example = "index", allowableValues = {"spot", "future", "option", "index"})
-        String instrumentType,
 
         @Schema(example = "NSE")
         String exchangeCode,
@@ -101,11 +87,6 @@ public record UserStrategyResponse(
         @Schema(example = "1")
         int peStrikeOffset,
 
-        @Schema(description = "The same instrument choice, derived: what this strategy actually "
-                + "trades. Read-only - writes address the ce*/pe* fields by name. A FUTURES strategy "
-                + "returns a single FUTURES leg.")
-        List<StrategyLegView> legs,
-
         // ------------------------------------------------------------- sizing
 
         @Schema(example = "DOUBLE", allowableValues = {"FIXED", "DOUBLE", "CUMULATIVE"})
@@ -128,38 +109,11 @@ public record UserStrategyResponse(
         @Schema(description = "Every indicator usage, flat and in display order.")
         List<UserStrategyIndicatorResponse> indicators,
 
-        @Schema(description = "The SAME usages, arranged one group per indicator name. A "
-                + "template that names the same indicator twice gives one group with two "
-                + "usages in it, instead of two look-alike rows.")
-        List<UserStrategyIndicatorGroupResponse> indicatorGroups,
-
-        // ---------------------------------------------------- fixed knobs
-
-        @Schema(description = "The fixed knobs above, arranged one group per paramGroup - "
-                + "Market, Instrument, Sizing, Exits - each carrying its descriptor from "
-                + "fixed_parameters and its current value. A second ARRANGEMENT of the flat "
-                + "fields, not a second source of truth: PUT still addresses the flat name. "
-                + "Empty if the descriptor catalog has been emptied.")
-        List<StrategyFixedParameterGroupResponse> fixedParameters,
-
         // ------------------------------------------------------------ runtime
-
-        @Schema(description = "The shared computation this resolved to; null until the market is set.",
-                example = "sc000000-1111-4222-8333-444444444444")
-        UUID sharedConfigId,
-
-        @Schema(description = "Changes whenever an indicator value, the symbol or the candle "
-                + "changes. Two strategies with the same hash share one computation.",
-                example = "6b1f0c9e2ad4471f9c3e5a70b8d21e4f6a9c0b3d5e7f1a2b3c4d5e6f70819a2b")
-        String configHash,
 
         @Schema(description = "True once symbol and candleDuration are set - gate the deploy "
                 + "button on this.", example = "true")
         boolean deployable,
-
-        @Schema(description = "How many brokers this is deployed on. An edit moves all of them.",
-                example = "3")
-        long deploymentCount,
 
         @Schema(example = "true")
         boolean active,

@@ -652,11 +652,17 @@ same order; `group=` narrows it to that one group.
 A descriptor with no group collects in a single entry whose `paramGroup` is
 `null`.
 
-The same fold, with each field's **value** filled in, comes back on
-`GET /api/v1/my-strategies/{id}` as `fixedParameters[]` — the strategy-scope
-knobs only, since the `Deployment` group describes subscription columns. It is an
-arrangement of the flat fields, not a second source of truth: writes still go
-through `PUT /api/v1/my-strategies/{id}` with the flat name.
+These descriptors are how a form renders a strategy's non-indicator fields. The
+**value** of each one is the flat field of the same `name` on
+`GET /api/v1/my-strategies/{id}` — bind the two by string equality (`slPct` the
+descriptor to `slPct` the field), and write back through
+`PUT /api/v1/my-strategies/{id}` under that same name. The strategy response
+carried a pre-joined `fixedParameters[]` until it was removed for going unread;
+the join is one line of client code and the descriptors are the same on every
+strategy, so they are fetched once per page rather than once per row.
+
+Only the strategy-scope knobs take part — the `Deployment` group describes
+subscription columns, and no strategy has them.
 
 ```http
 GET  {{BASE}}/api/v1/fixed-parameters/by-name/slPct
@@ -834,19 +840,14 @@ Enums parse case-insensitively (`"otm"` works), but send the canonical form.
 
 ```json
 { "id": "us000000-0000-0000-0000-000000000001",
-  "userId": "u0000000-0000-0000-0000-000000000001",
 
   "strategyId": "t1000000-0000-0000-0000-000000000001",
   "strategyName": "EMA Averaging",
-  "strategyDescription": "EMA of the highs against a shorter signal leg…",
-  "strategySystem": true,
 
   "name": "NIFTY 21/9 both sides",
   "description": "Sheet block 1",
 
-  "symbolId": "1a2b3c4d-0000-0000-0000-000000000001",
   "symbol": "NIFTY",
-  "instrumentType": "index",
   "exchangeCode": "NSE",
   "candleDuration": "5m",
   "triggerDuration": "5m",
@@ -854,9 +855,6 @@ Enums parse case-insensitively (`"otm"` works), but send the canonical form.
   "derivative": "OPTION",
   "ceEnabled": true,  "ceMoneyness": "OTM", "ceStrikeOffset": 1,
   "peEnabled": true,  "peMoneyness": "OTM", "peStrikeOffset": 1,
-  "legs": [
-    { "side": "CE", "moneyness": "OTM", "strikeOffset": 1, "label": "CE OTM1" },
-    { "side": "PE", "moneyness": "OTM", "strikeOffset": 1, "label": "PE OTM1" } ],
 
   "lotRule": "DOUBLE",
   "baseLot": 65,
@@ -876,11 +874,7 @@ Enums parse case-insensitively (`"otm"` works), but send the canonical form.
         "k": { "type": "int", "min": 1, "max": 300, "default": 21 },
         "d": { "type": "int", "min": 1, "max": 300, "default": 9, "lt": "k" } } } ],
 
-  "sharedConfigId": "sc000000-0000-0000-0000-000000000001",
-  "configHash": "6b1f0c9e2a…",
   "deployable": true,
-  "deploymentCount": 0,
-
   "active": true,
   "createdAt": "2026-08-23T19:45:10.221+05:30",
   "updatedAt": "2026-08-23T19:45:10.221+05:30" }
@@ -889,12 +883,26 @@ Enums parse case-insensitively (`"otm"` works), but send the canonical form.
 Notes for the UI:
 
 - the `ce*` / `pe*` fields are the **editable** form — same names as the request;
-- `legs[]` is the same choice **derived** for display (read-only). For a `FUTURES`
-  strategy it is a single `[{"side":"FUTURES","moneyness":null,"strikeOffset":0,"label":"FUTURES"}]`;
 - `params` comes back **sorted** (`d` before `k`) — that is the canonical order
   the hash is computed over, not a display order;
-- `deployable` gates the deploy button; `deploymentCount` tells the user how many
-  brokers an edit will move.
+- `deployable` gates the deploy button.
+
+**The shape is flat.** It used to also ship `legs[]` (the CE/PE choice derived for
+display), `indicatorGroups[]` (`indicators[]` by name) and `fixedParameters[]`
+(descriptor + value by `paramGroup`), plus `userId`, `strategyDescription`,
+`strategySystem`, `symbolId`, `instrumentType`, `sharedConfigId`, `configHash` and
+`deploymentCount`. All of it was a second view of something already in the row and
+nothing read any of it, so a list of N strategies paid for all of it N times.
+Where to find what is gone:
+
+| Was | Now |
+| --- | --- |
+| `legs[]` | derive from `derivative` + the `ce*` / `pe*` fields, or read `/my-strategies/{id}/runtime` |
+| `indicatorGroups[]` | group `indicators[]` by `indicatorName` |
+| `fixedParameters[]` | `GET /api/v1/fixed-parameters` for the descriptors; the value is the flat field of the same `name` |
+| `sharedConfigId`, `configHash` | `/my-strategies/{id}/runtime`, or a deployment on `/my-subscriptions` |
+| `deploymentCount` | `GET /api/v1/my-subscriptions` (one call for the whole page) and count by `userStrategyId` |
+| `strategyDescription`, `strategySystem` | the group heading on `/grouped`, or `/strategy-templates` |
 
 ### 8.3 The FUTURES variant
 
@@ -959,10 +967,9 @@ GET {{BASE}}/api/v1/my-strategies/grouped?strategyId={{templateId}}   # just tha
 ```
 
 Each entry in `strategies[]` is the **same complete `UserStrategyResponse`** the
-flat list returns — `legs[]`, `indicators[]`, `indicatorGroups[]`,
-`fixedParameters[]`, `configHash`, `deployable`, all of it. One mapper builds both
-shapes, so they cannot drift; grouping changes how the rows are arranged, never
-what a row carries.
+flat list returns — the configuration fields, `indicators[]` with their schemas,
+`deployable`, `active`, all of it. One mapper builds both shapes, so they cannot
+drift; grouping changes how the rows are arranged, never what a row carries.
 
 The group header carries the template: `strategyName`, `strategyDescription`,
 `strategySystem` (a seeded template is locked, so the logic cannot change under
@@ -1017,8 +1024,9 @@ PUT {{BASE}}/api/v1/my-strategies/{{id}}
 { "indicators": [ { "indicatorName": "EMA Averaging", "params": { "k": 50 } } ] }
 ```
 
-`d` keeps its value. **200** with the full editor shape — and `configHash` /
-`sharedConfigId` will have changed, because `k` feeds the hash.
+`d` keeps its value. **200** with the full editor shape. `k` feeds the hash, so the
+strategy has also repointed at a different shared computation - the response does
+not show that; read it from `/my-strategies/{id}/runtime`.
 
 Other common edits:
 
@@ -1387,7 +1395,8 @@ curl -s "${H[@]}" -X POST "$BASE/api/v1/my-strategies/$US/deploy" \
 # 6. retune — every broker follows
 curl -s "${H[@]}" -X PUT "$BASE/api/v1/my-strategies/$US" \
   -d '{"indicators":[{"indicatorName":"EMA Averaging","params":{"k":50,"d":21}}]}' \
-  | jq '.configHash,.deploymentCount'
+  | jq '.name,.indicators'
+curl -s "${H[@]}" "$BASE/api/v1/my-strategies/$US/runtime" | jq '.configHash'
 
 # 7. the dedup gate
 curl -s "${H[@]}" "$BASE/api/v1/shared-strategy-configs/indicator-plan" | jq

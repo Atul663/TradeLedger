@@ -1,18 +1,13 @@
 package com.example.tradeLedger;
 
-import com.example.tradeLedger.dto.UserStrategyIndicatorGroupResponse;
 import com.example.tradeLedger.dto.UserStrategyIndicatorResponse;
-import com.example.tradeLedger.dto.UserStrategyResponse;
 import com.example.tradeLedger.entity.Indicator;
 import com.example.tradeLedger.entity.StrategyTemplate;
 import com.example.tradeLedger.entity.User;
 import com.example.tradeLedger.entity.UserStrategy;
 import com.example.tradeLedger.entity.UserStrategyIndicator;
 import com.example.tradeLedger.indicator.IndicatorResolver;
-import com.example.tradeLedger.repository.ExchangeRepository;
-import com.example.tradeLedger.repository.FixedParameterRepository;
 import com.example.tradeLedger.repository.IndicatorRepository;
-import com.example.tradeLedger.repository.SymbolRepository;
 import com.example.tradeLedger.repository.SharedStrategyConfigRepository;
 import com.example.tradeLedger.repository.StrategySubscriptionRepository;
 import com.example.tradeLedger.repository.StrategyTemplateRepository;
@@ -22,10 +17,8 @@ import com.example.tradeLedger.repository.UserStrategyIndicatorRepository;
 import com.example.tradeLedger.repository.UserStrategyRepository;
 import com.example.tradeLedger.service.CurrentUserService;
 import com.example.tradeLedger.service.SharedStrategyConfigService;
-import com.example.tradeLedger.serviceImpl.FixedParameterOptions;
 import com.example.tradeLedger.serviceImpl.IndicatorParams;
 import com.example.tradeLedger.serviceImpl.RuleTrees;
-import com.example.tradeLedger.serviceImpl.StrategyFixedParameters;
 import com.example.tradeLedger.serviceImpl.SubscriptionFanOut;
 import com.example.tradeLedger.serviceImpl.SymbolResolver;
 import com.example.tradeLedger.serviceImpl.UserStrategyServiceImpl;
@@ -47,17 +40,17 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * A strategy's indicator tuning, arranged one section per indicator name.
+ * A strategy's indicator tuning as the response carries it: one flat row per
+ * usage, in display order.
  *
- * The arrangement only earns its place when a template names the same indicator
- * more than once - two EMAs on different periods, an RSI filter per side. Flat,
- * those read as repeating look-alike rows; grouped, they read as one section with
- * its usages under it. So what is worth pinning is that repeats actually land
- * together, that the grouped shape holds exactly the rows the flat list does, and
- * that the group's tag and schema describe the indicator rather than one usage
- * of it.
+ * The case worth pinning is a template naming the same indicator more than once -
+ * two EMAs on different periods, an RSI filter per side. Those rows look alike,
+ * so what has to hold is that each keeps its OWN slot, values and enabled flag
+ * while sharing the indicator's schema. The response used to ship a second,
+ * grouped-by-name arrangement of these same rows; it was removed because nothing
+ * read it, and the flat list below is the whole contract now.
  */
-class IndicatorGroupingTest {
+class IndicatorUsageTest {
 
     private static final String EMAIL = "trader@example.com";
     private static final UUID USER_ID = UUID.fromString("00000000-1111-4222-8333-444444444444");
@@ -70,15 +63,12 @@ class IndicatorGroupingTest {
             {"period":{"type":"int","min":1,"max":300,"default":21}}""";
 
     private UserStrategyIndicatorRepository indicatorRows;
-    private SharedStrategyConfigRepository sharedConfigs;
-    private UserStrategyRepository strategies;
     private UserStrategyServiceImpl service;
-    private User user;
     private UserStrategy strategy;
 
     @BeforeEach
     void setUp() {
-        user = new User();
+        User user = new User();
         user.setId(USER_ID);
 
         CurrentUserService currentUser = mock(CurrentUserService.class);
@@ -94,18 +84,13 @@ class IndicatorGroupingTest {
         strategy.setStrategy(template);
         strategy.setName("NIFTY 21/9");
 
-        strategies = mock(UserStrategyRepository.class);
+        UserStrategyRepository strategies = mock(UserStrategyRepository.class);
         when(strategies.findByIdAndUser_Id(STRATEGY_ID, USER_ID))
                 .thenReturn(java.util.Optional.of(strategy));
 
         indicatorRows = mock(UserStrategyIndicatorRepository.class);
-        sharedConfigs = mock(SharedStrategyConfigRepository.class);
+        SharedStrategyConfigRepository sharedConfigs = mock(SharedStrategyConfigRepository.class);
         when(sharedConfigs.countByStrategyIds(any())).thenReturn(List.of());
-
-        // A real one over an empty catalog rather than a mock: it is what the
-        // service actually calls, and a stubbed snapshot would only assert that
-        // the stub was wired up.
-        StrategyFixedParameters fixedParameters = emptyFixedParameters();
 
         service = new UserStrategyServiceImpl(
                 currentUser,
@@ -123,18 +108,7 @@ class IndicatorGroupingTest {
                 mock(UserStrategyValidator.class),
                 mock(SymbolResolver.class),
                 mock(RuleTrees.class),
-                fixedParameters,
                 new JsonSupport(new ObjectMapper()));
-    }
-
-    /** No descriptors, so fixedParameters[] comes back empty and stays out of the way. */
-    static StrategyFixedParameters emptyFixedParameters() {
-        FixedParameterRepository descriptors = mock(FixedParameterRepository.class);
-        when(descriptors.findByActiveOrderByParamGroupAscDisplayOrderAscNameAsc(true))
-                .thenReturn(List.of());
-        return new StrategyFixedParameters(descriptors, new FixedParameterOptions(
-                mock(SymbolRepository.class), mock(ExchangeRepository.class),
-                new JsonSupport(new ObjectMapper())));
     }
 
     private static Indicator indicator(UUID id, String name, String schema) {
@@ -164,13 +138,13 @@ class IndicatorGroupingTest {
                 .thenReturn(List.of(rows));
     }
 
-    private UserStrategyResponse read() {
-        return service.get(EMAIL, STRATEGY_ID);
+    private List<UserStrategyIndicatorResponse> read() {
+        return service.get(EMAIL, STRATEGY_ID).indicators();
     }
 
-    /** The case the grouping exists for: one template, the same indicator twice. */
+    /** The case the slot exists for: one template, the same indicator twice. */
     @Test
-    void twoUsagesOfOneIndicatorLandInOneGroup() {
+    void twoUsagesOfOneIndicatorStayTwoRowsWithTheirOwnTuning() {
         Indicator ema = indicator(EMA_ID, "EMA", EMA_SCHEMA);
         Indicator rsi = indicator(RSI_ID, "RSI", """
                 {"period":{"type":"int","default":14}}""");
@@ -182,88 +156,51 @@ class IndicatorGroupingTest {
                 usage(rsi, null, 2, """
                         {"period":14}""", true));
 
-        List<UserStrategyIndicatorGroupResponse> groups = read().indicatorGroups();
+        List<UserStrategyIndicatorResponse> indicators = read();
 
-        assertEquals(2, groups.size(), "one group per indicator name, not per usage");
-        assertEquals("EMA", groups.get(0).indicatorName());
-        assertEquals(EMA_ID, groups.get(0).indicatorId());
-        assertEquals(2, groups.get(0).count());
+        assertEquals(3, indicators.size(), "one row per usage, not per indicator name");
+        assertEquals(List.of("EMA", "EMA", "RSI"),
+                indicators.stream().map(UserStrategyIndicatorResponse::indicatorName).toList());
         assertEquals(List.of("fast", "slow"),
-                groups.get(0).indicators().stream()
+                indicators.stream()
+                        .filter(row -> EMA_ID.equals(row.indicatorId()))
                         .map(UserStrategyIndicatorResponse::slot).toList(),
-                "the usages keep the flat list's displayOrder");
-        assertEquals(List.of(Map.of("period", 9), Map.of("period", 21)),
-                groups.get(0).indicators().stream()
-                        .map(UserStrategyIndicatorResponse::params).toList(),
+                "the repeats are told apart by slot, in displayOrder");
+        assertEquals(List.of(Map.of("period", 9), Map.of("period", 21), Map.of("period", 14)),
+                indicators.stream().map(UserStrategyIndicatorResponse::params).toList(),
                 "and each keeps its own tuning");
-        assertEquals("RSI", groups.get(1).indicatorName());
-        assertEquals(1, groups.get(1).count());
     }
 
-    /** Grouping rearranges rows; it must not add, drop or alter one. */
+    /** The schema is the indicator's, so every usage of it is validated against the same one. */
     @Test
-    void theGroupedShapeHoldsExactlyTheRowsTheFlatListDoes() {
-        Indicator ema = indicator(EMA_ID, "EMA", EMA_SCHEMA);
-        Indicator rsi = indicator(RSI_ID, "RSI", EMA_SCHEMA);
-        withRows(
-                usage(ema, "fast", 0, "{}", true),
-                usage(rsi, null, 1, "{}", true),
-                usage(ema, "slow", 2, "{}", true));
-
-        UserStrategyResponse response = read();
-        List<UserStrategyIndicatorResponse> flattened = response.indicatorGroups().stream()
-                .flatMap(group -> group.indicators().stream())
-                .toList();
-
-        assertEquals(3, response.indicators().size());
-        assertEquals(response.indicators().size(), flattened.size());
-        assertTrue(flattened.containsAll(response.indicators()),
-                "the same rows, only rearranged");
-    }
-
-    /**
-     * The schema belongs to the indicator, so hoisting it to the group must not
-     * change it - and a client that ignores the grouping still finds it on the row.
-     */
-    @Test
-    void theSchemaIsHoistedToTheGroupAndKeptOnEachUsage() {
+    void everyUsageCarriesTheIndicatorsSchema() {
         Indicator ema = indicator(EMA_ID, "EMA", EMA_SCHEMA);
         withRows(usage(ema, "fast", 0, "{}", true), usage(ema, "slow", 1, "{}", true));
 
-        UserStrategyIndicatorGroupResponse group = read().indicatorGroups().get(0);
+        List<UserStrategyIndicatorResponse> indicators = read();
 
-        assertFalse(group.schema().isEmpty());
-        group.indicators().forEach(usage ->
-                assertEquals(group.schema(), usage.schema(),
-                        "the group's schema is the usage's schema"));
+        assertFalse(indicators.get(0).schema().isEmpty());
+        assertEquals(indicators.get(0).schema(), indicators.get(1).schema(),
+                "two usages of one indicator declare the same knobs");
     }
 
-    /**
-     * A section header renders one enabled flag for the whole group, so it has to
-     * mean "any usage is live" - a group shown as off while it still trades would
-     * be the wrong way round.
-     */
+    /** Enabled is per usage: parking the fast leg must not park the slow one. */
     @Test
-    void aGroupIsEnabledWhileAnyOfItsUsagesIs() {
+    void eachUsageKeepsItsOwnEnabledFlag() {
         Indicator ema = indicator(EMA_ID, "EMA", EMA_SCHEMA);
-        Indicator rsi = indicator(RSI_ID, "RSI", EMA_SCHEMA);
-        withRows(
-                usage(ema, "fast", 0, "{}", false),
-                usage(ema, "slow", 1, "{}", true),
-                usage(rsi, null, 2, "{}", false));
+        withRows(usage(ema, "fast", 0, "{}", false), usage(ema, "slow", 1, "{}", true));
 
-        List<UserStrategyIndicatorGroupResponse> groups = read().indicatorGroups();
+        List<UserStrategyIndicatorResponse> indicators = read();
 
-        assertTrue(groups.get(0).enabled(), "one live usage keeps the group live");
-        assertFalse(groups.get(1).enabled(), "all off means off");
+        assertFalse(indicators.get(0).enabled());
+        assertTrue(indicators.get(1).enabled());
     }
 
     @Test
-    void aStrategyWithNoIndicatorsGetsNoGroups() {
+    void aStrategyWithNoIndicatorsGetsAnEmptyArray() {
         withRows();
 
-        assertTrue(read().indicatorGroups().isEmpty(),
-                "an empty array, not a group with nothing in it");
+        assertTrue(read().isEmpty(), "an empty array, not null");
     }
 
     // ------------------------------------------------- the template's own count

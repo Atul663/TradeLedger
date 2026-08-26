@@ -560,9 +560,11 @@ Partial: a present field is applied, an absent one left alone. Send
 keeps its value.
 
 If the change moves the signal params, the strategy repoints at a different
-shared computation — `sharedConfigId` and `configHash` change, the old instance is
-retired once its last active deployment leaves, and **every broker running this
-strategy follows**, because they point at this row rather than copying it.
+shared computation, the old instance is retired once its last active deployment
+leaves, and **every broker running this strategy follows**, because they point at
+this row rather than copying it. The strategy response does not carry the
+instance — read `sharedConfigId` / `configHash` from a deployment
+(`/my-subscriptions`) or from `/my-strategies/{id}/runtime`.
 
 ### 6.5 Withdraw — `DELETE /api/v1/my-subscriptions/{id}`
 
@@ -715,7 +717,7 @@ All strategy-module endpoints require `Authorization: Bearer <accessToken>`.
 | GET/POST | `/api/v1/my-strategies` | The caller's strategies, ownership-filtered |
 | DELETE | `/api/v1/my-strategies?active=&strategyId=` | **Bulk delete** under the list's own filters. Still-deployed strategies are **skipped, not refused**; per-strategy outcome in `results[]` |
 | GET | `/api/v1/my-strategies/grouped?active=&strategyId=` | The same **complete** rows, one group per template, each tagged with `strategyName`, `strategyDescription`, `strategySystem` and `instanceCount`. One mapper builds both shapes, so a grouped row can never carry less than a flat one |
-| GET/PUT/DELETE | `/api/v1/my-strategies/{id}` | Editor shape: the flat fields, plus the same content arranged as `indicatorGroups[]` (by indicator name) and `fixedParameters[]` (by `paramGroup`, descriptor + value). Writes address the flat names. Another user's row reports **404, not 403** |
+| GET/PUT/DELETE | `/api/v1/my-strategies/{id}` | Editor shape: **flat only** — every setting under the name the request takes, plus `indicators[]` with each one's schema. Writes address the same names. Another user's row reports **404, not 403** |
 | GET | `/api/v1/my-strategies/{id}/runtime` | Bot shape: legs resolved, values coerced |
 | POST | `/api/v1/my-strategies/{id}/deploy` | **Fan out to many brokers**, per-target outcome |
 | GET/POST | `/api/v1/my-subscriptions` | Deployments, ownership-filtered |
