@@ -315,9 +315,11 @@ means the column default.
 | `indicators[].params` | schema defaults | **merged** over what is stored |
 | `active` | `true` | archive without deleting |
 
-An indicator entry is addressed by `indicatorName`, `indicatorId`, or
-`userStrategyIndicatorId` — plus `slot` only when a template uses one indicator
-twice.
+An indicator entry is addressed by `indicatorName` — plus `slot` only when a
+template uses one indicator twice. Both come straight off the read (5.3), so a
+retune is the entry you read back with the params you changed. `indicatorId` and
+`userStrategyIndicatorId` are also accepted; the latter is no longer returned by
+any read.
 
 ### 5.3 `GET /api/v1/my-strategies/{id}` — the editor shape
 
@@ -338,11 +340,8 @@ twice.
   "slPct": 1.50, "tpPct": 3.00,
 
   "indicators": [ {
-      "id": "…", "indicatorId": "…", "indicatorName": "EMA Averaging",
-      "slot": null, "enabled": true, "displayOrder": 0,
-      "params": { "d": 9, "k": 21 },
-      "paramSchema": { "k": {"type":"int","min":1,"max":300,"default":21},
-                       "d": {"type":"int","min":1,"max":300,"default":9,"lt":"k"} } } ],
+      "indicatorName": "EMA Averaging", "slot": null,
+      "params": { "d": 9, "k": 21 } } ],
 
   "deployable": true, "active": true,
   "createdAt": "…", "updatedAt": "…"
@@ -354,20 +353,33 @@ field under the same name the request takes, so a round trip is
 edit-one-field-and-PUT-it-back. `deployable` is false until symbol and candle are
 set — use it to gate the deploy button.
 
-`indicators[]` is one row per usage, in `displayOrder`. It reads as repeating
-look-alike rows only when a template names the same indicator twice, and `slot`
-is what tells those apart (`"fast"` / `"slow"`); group by `indicatorName` client-
-side if you want a section per indicator. `paramSchema` is on every row, so the
-form for a strategy can be drawn from the strategy alone.
+`indicators[]` is **values only**: one entry per usage, in display order, carrying
+`{indicatorName, slot, params}` — the same three keys a write takes. It reads as
+repeating look-alike rows only when a template names the same indicator twice, and
+`slot` is what tells those apart (`"fast"` / `"slow"`), on the way out and on the
+way back in. Group by `indicatorName` client-side if you want a section per
+indicator.
+
+> **Rendering the indicator inputs needs the template.** `paramSchema` — type,
+> bounds, default, `gt`/`lt` rules — belongs to the indicator, not to one
+> strategy's usage of it, and is no longer repeated on every row. Read it from
+> `GET /api/v1/strategy-templates` (`indicators[].paramSchema`, keyed by indicator
+> name) and join it to `params` by name. One fetch per page covers every strategy
+> on screen.
 
 #### What this response no longer carries
 
-It used to ship several re-arrangements of its own content, plus the ids behind
-the row. Nothing consumed them and a list of N strategies paid for all of them N
-times, so they were removed. If you were reading one:
+It used to ship several re-arrangements of its own content, the indicator
+declarations, and the ids behind the row. Nothing consumed them and a list of N
+strategies paid for all of them N times, so they were removed. If you were reading
+one:
 
 | Was | Now |
 | --- | --- |
+| `indicators[].paramSchema` | `/api/v1/strategy-templates` → `indicators[].paramSchema`, by indicator name |
+| `indicators[].id`, `.indicatorId` | address a usage by `indicatorName` (+ `slot`) — see 5.2 |
+| `indicators[].displayOrder` | the array is already in that order |
+| `indicators[].enabled` | still writable; a disabled usage is simply absent from the bot shape (5.4) |
 | `legs[]` | derive from `derivative` + the `ce*` / `pe*` fields, or read the bot shape (5.4) |
 | `indicatorGroups[]` | group `indicators[]` by `indicatorName` |
 | `fixedParameters[]` | `GET /api/v1/fixed-parameters/grouped` for the descriptors; each one's value is the flat field of the same `name` |

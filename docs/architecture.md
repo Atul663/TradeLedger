@@ -717,7 +717,7 @@ All strategy-module endpoints require `Authorization: Bearer <accessToken>`.
 | GET/POST | `/api/v1/my-strategies` | The caller's strategies, ownership-filtered |
 | DELETE | `/api/v1/my-strategies?active=&strategyId=` | **Bulk delete** under the list's own filters. Still-deployed strategies are **skipped, not refused**; per-strategy outcome in `results[]` |
 | GET | `/api/v1/my-strategies/grouped?active=&strategyId=` | The same **complete** rows, one group per template, each tagged with `strategyName`, `strategyDescription`, `strategySystem` and `instanceCount`. One mapper builds both shapes, so a grouped row can never carry less than a flat one |
-| GET/PUT/DELETE | `/api/v1/my-strategies/{id}` | Editor shape: **flat only** — every setting under the name the request takes, plus `indicators[]` with each one's schema. Writes address the same names. Another user's row reports **404, not 403** |
+| GET/PUT/DELETE | `/api/v1/my-strategies/{id}` | Editor shape: **values only** — every setting under the name the request takes, plus `indicators[]` as `{indicatorName, slot, params}`. Schemas come from `/strategy-templates`. Writes address the same names. Another user's row reports **404, not 403** |
 | GET | `/api/v1/my-strategies/{id}/runtime` | Bot shape: legs resolved, values coerced |
 | POST | `/api/v1/my-strategies/{id}/deploy` | **Fan out to many brokers**, per-target outcome |
 | GET/POST | `/api/v1/my-subscriptions` | Deployments, ownership-filtered |

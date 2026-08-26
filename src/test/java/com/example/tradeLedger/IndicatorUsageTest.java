@@ -28,12 +28,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.RecordComponent;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -45,10 +46,14 @@ import static org.mockito.Mockito.when;
  *
  * The case worth pinning is a template naming the same indicator more than once -
  * two EMAs on different periods, an RSI filter per side. Those rows look alike,
- * so what has to hold is that each keeps its OWN slot, values and enabled flag
- * while sharing the indicator's schema. The response used to ship a second,
- * grouped-by-name arrangement of these same rows; it was removed because nothing
- * read it, and the flat list below is the whole contract now.
+ * so what has to hold is that each keeps its OWN slot and values, since the slot
+ * is the only thing telling them apart on the way back in.
+ *
+ * A row carries values and nothing else. The schema they are validated against
+ * belongs to the indicator and is read from the template; the row id, the
+ * indicator id, displayOrder and enabled were dropped along with the
+ * grouped-by-name arrangement that used to sit beside this list, none of which
+ * anything read.
  */
 class IndicatorUsageTest {
 
@@ -163,7 +168,7 @@ class IndicatorUsageTest {
                 indicators.stream().map(UserStrategyIndicatorResponse::indicatorName).toList());
         assertEquals(List.of("fast", "slow"),
                 indicators.stream()
-                        .filter(row -> EMA_ID.equals(row.indicatorId()))
+                        .filter(row -> "EMA".equals(row.indicatorName()))
                         .map(UserStrategyIndicatorResponse::slot).toList(),
                 "the repeats are told apart by slot, in displayOrder");
         assertEquals(List.of(Map.of("period", 9), Map.of("period", 21), Map.of("period", 14)),
@@ -171,29 +176,24 @@ class IndicatorUsageTest {
                 "and each keeps its own tuning");
     }
 
-    /** The schema is the indicator's, so every usage of it is validated against the same one. */
+    /**
+     * The row carries what a caller sends back and nothing else.
+     *
+     * Its schema is the INDICATOR's, the same for every strategy using it, and is
+     * read from the template; its row id and displayOrder were addressing and
+     * ordering a caller does not need, since the array is already in order and a
+     * write addresses by name and slot.
+     */
     @Test
-    void everyUsageCarriesTheIndicatorsSchema() {
+    void aUsageCarriesItsValuesAndNothingElse() {
         Indicator ema = indicator(EMA_ID, "EMA", EMA_SCHEMA);
-        withRows(usage(ema, "fast", 0, "{}", true), usage(ema, "slow", 1, "{}", true));
+        withRows(usage(ema, "fast", 0, """
+                {"period":9}""", true));
 
-        List<UserStrategyIndicatorResponse> indicators = read();
-
-        assertFalse(indicators.get(0).schema().isEmpty());
-        assertEquals(indicators.get(0).schema(), indicators.get(1).schema(),
-                "two usages of one indicator declare the same knobs");
-    }
-
-    /** Enabled is per usage: parking the fast leg must not park the slow one. */
-    @Test
-    void eachUsageKeepsItsOwnEnabledFlag() {
-        Indicator ema = indicator(EMA_ID, "EMA", EMA_SCHEMA);
-        withRows(usage(ema, "fast", 0, "{}", false), usage(ema, "slow", 1, "{}", true));
-
-        List<UserStrategyIndicatorResponse> indicators = read();
-
-        assertFalse(indicators.get(0).enabled());
-        assertTrue(indicators.get(1).enabled());
+        assertEquals(List.of("indicatorName", "slot", "params"),
+                Arrays.stream(UserStrategyIndicatorResponse.class.getRecordComponents())
+                        .map(RecordComponent::getName).toList());
+        assertEquals(Map.of("period", 9), read().get(0).params());
     }
 
     @Test

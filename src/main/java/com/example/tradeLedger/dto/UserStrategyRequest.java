@@ -146,8 +146,9 @@ public class UserStrategyRequest {
             description = "Values for one indicator, validated against its own param_schema.")
     public static class IndicatorTuning {
 
-        @Schema(description = "The row id from a strategy response. The most precise way to "
-                + "address an existing usage.",
+        @Schema(description = "The usage row's own id. Still accepted, but no longer handed out "
+                + "- a strategy response carries indicatorName and slot, which address the same "
+                + "usage. Prefer those.",
                 example = "7c9e6f10-3b2a-4d5c-8e1f-0a9b8c7d6e5f")
         private UUID userStrategyIndicatorId;
 

@@ -861,19 +861,15 @@ public class UserStrategyServiceImpl implements UserStrategyService {
         StrategyTemplate template = strategy.getStrategy();
         Symbol symbol = strategy.getSymbol();
 
+        // Values only, in display order. The schema behind them belongs to the
+        // indicator, not to this usage, so it is read once from the template
+        // rather than repeated on every row of every strategy in a list.
         List<UserStrategyIndicatorResponse> indicators = new ArrayList<>();
         for (UserStrategyIndicator row : batch.indicatorsOf(strategy)) {
-            Indicator indicator = row.getIndicator();
-            UserStrategyIndicatorResponse usage = new UserStrategyIndicatorResponse(
-                    row.getId(),
-                    indicator.getId(),
-                    indicator.getName(),
+            indicators.add(new UserStrategyIndicatorResponse(
+                    row.getIndicator().getName(),
                     row.getSlot(),
-                    row.isEnabled(),
-                    row.getDisplayOrder(),
-                    json.toMap(row.getParams()),
-                    json.toMap(indicator.getParamSchema()));
-            indicators.add(usage);
+                    json.toMap(row.getParams())));
         }
 
         return new UserStrategyResponse(

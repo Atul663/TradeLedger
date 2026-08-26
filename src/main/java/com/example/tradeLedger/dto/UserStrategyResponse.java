@@ -8,30 +8,36 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * A saved strategy: one call renders the whole editor.
+ * A saved strategy: what the caller set, under the names they set it with.
  *
  * The configuration arrives as the columns it is stored in - the same names the
  * request takes, so a round trip is edit-one-field-and-PUT-it-back. Each
- * indicator carries its current values and the schema those values are validated
- * against, so the form can render an input for a knob nobody hardcoded.
+ * indicator entry is the same: the values, under the name and slot that address
+ * that usage on the way back in.
  *
- * <b>One arrangement, not several.</b> Earlier revisions also shipped the same
- * content re-grouped for a form - {@code legs[]} derived from the CE and PE
+ * <b>Values, not descriptions.</b> Earlier revisions also shipped the same
+ * content re-grouped for a form ({@code legs[]} derived from the CE and PE
  * fields, {@code indicatorGroups[]} by indicator name, {@code fixedParameters[]}
- * by paramGroup - along with the ids behind the row ({@code userId},
- * {@code symbolId}, {@code sharedConfigId}, {@code configHash}). Every one of
- * them was a second view of something already here, and nothing read them; a
- * list response paid for all of them on every row. The flat fields below are the
- * whole shape now.
+ * by paramGroup), the ids behind the row ({@code userId}, {@code symbolId},
+ * {@code sharedConfigId}, {@code configHash}) and, on every indicator usage, the
+ * indicator's own {@code paramSchema}. All of it was either a second view of
+ * something already here or a fact about the CATALOG rather than about this row -
+ * identical for every strategy sharing that indicator - and a list response paid
+ * for the lot once per row. A client reads the catalog once, from
+ * {@code /api/v1/strategy-templates} and {@code /api/v1/fixed-parameters}, and
+ * joins it to these values by name.
  */
 @Schema(name = "UserStrategyResponse",
         description = """
-                One saved strategy. The ce*/pe* fields are the EDITABLE form - the same names the \
-                request takes - and each indicator carries both its current values and its \
-                schema, so the form can render an input for a knob nobody hardcoded.
+                One saved strategy: the caller's settings, and nothing derived or duplicated. \
+                The ce*/pe* fields are the EDITABLE form - the same names the request takes - \
+                and indicators[] carries each usage's values under the name and slot that \
+                address it on a write.
 
-                Flat only: there is one arrangement of the configuration, and a PUT addresses it \
-                by name.""")
+                Values only. What those values MEAN - an indicator's param schema, a fixed \
+                knob's label and bounds - belongs to the catalog, is the same for every strategy \
+                using it, and is read from /api/v1/strategy-templates and \
+                /api/v1/fixed-parameters once per page.""")
 public record UserStrategyResponse(
 
         @Schema(example = "us000000-1111-4222-8333-444444444444")

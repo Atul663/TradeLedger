@@ -828,9 +828,12 @@ Authorization: Bearer {{TOKEN}}
 | `indicators[]` | array | schema defaults | see below |
 | `active` | bool | `true` | archive without deleting |
 
-`indicators[]` entry: `{ "indicatorName" \| "indicatorId" \| "userStrategyIndicatorId", "slot"?, "params"?, "enabled"? }`.
-`params` is **merged** over what is stored, so `{"k":50}` changes only `k`.
-`slot` is needed only when a template uses one indicator twice.
+`indicators[]` entry: `{ "indicatorName", "slot"?, "params"?, "enabled"? }` — the
+same shape a read returns, so send back the entry you read with the params you
+changed. `params` is **merged** over what is stored, so `{"k":50}` changes only
+`k`. `slot` is needed only when a template uses one indicator twice.
+`indicatorId` and `userStrategyIndicatorId` also address a usage; the latter is
+no longer returned by any read.
 
 Enums parse case-insensitively (`"otm"` works), but send the canonical form.
 
@@ -863,16 +866,9 @@ Enums parse case-insensitively (`"otm"` works), but send the canonical form.
   "tpPct": 3.00,
 
   "indicators": [
-    { "id": "ui000000-0000-0000-0000-000000000001",
-      "indicatorId": "i1000000-0000-0000-0000-000000000001",
-      "indicatorName": "EMA Averaging",
+    { "indicatorName": "EMA Averaging",
       "slot": null,
-      "enabled": true,
-      "displayOrder": 0,
-      "params": { "d": 9, "k": 21 },
-      "paramSchema": {
-        "k": { "type": "int", "min": 1, "max": 300, "default": 21 },
-        "d": { "type": "int", "min": 1, "max": 300, "default": 9, "lt": "k" } } } ],
+      "params": { "d": 9, "k": 21 } } ],
 
   "deployable": true,
   "active": true,
@@ -885,24 +881,30 @@ Notes for the UI:
 - the `ce*` / `pe*` fields are the **editable** form — same names as the request;
 - `params` comes back **sorted** (`d` before `k`) — that is the canonical order
   the hash is computed over, not a display order;
-- `deployable` gates the deploy button.
+- `deployable` gates the deploy button;
+- `indicators[]` is **values only** — `{indicatorName, slot, params}`, which is
+  also exactly what a write takes, so a retune is change-a-value-and-PUT-it-back.
+  `slot` is null unless a template uses one indicator twice; then it is what tells
+  the usages apart in both directions.
 
-**The shape is flat.** It used to also ship `legs[]` (the CE/PE choice derived for
-display), `indicatorGroups[]` (`indicators[]` by name) and `fixedParameters[]`
-(descriptor + value by `paramGroup`), plus `userId`, `strategyDescription`,
-`strategySystem`, `symbolId`, `instrumentType`, `sharedConfigId`, `configHash` and
-`deploymentCount`. All of it was a second view of something already in the row and
-nothing read any of it, so a list of N strategies paid for all of it N times.
-Where to find what is gone:
+**Values, not descriptions.** This response carries the caller's own settings and
+nothing derived, duplicated or looked-up. Everything below was dropped because
+nothing read it and a list of N strategies paid for all of it N times:
 
 | Was | Now |
 | --- | --- |
+| `indicators[].paramSchema` | the indicator's own declaration, identical for every strategy using it — read it once from `/api/v1/strategy-templates` (or `/api/v1/indicators`) |
+| `indicators[].id`, `.indicatorId` | address a usage by `indicatorName` (+ `slot`) — the request has always accepted that |
+| `indicators[].displayOrder` | the array is already in that order |
+| `indicators[].enabled` | still writable; a disabled usage is simply absent from `/my-strategies/{id}/runtime` |
 | `legs[]` | derive from `derivative` + the `ce*` / `pe*` fields, or read `/my-strategies/{id}/runtime` |
 | `indicatorGroups[]` | group `indicators[]` by `indicatorName` |
 | `fixedParameters[]` | `GET /api/v1/fixed-parameters` for the descriptors; the value is the flat field of the same `name` |
 | `sharedConfigId`, `configHash` | `/my-strategies/{id}/runtime`, or a deployment on `/my-subscriptions` |
 | `deploymentCount` | `GET /api/v1/my-subscriptions` (one call for the whole page) and count by `userStrategyId` |
 | `strategyDescription`, `strategySystem` | the group heading on `/grouped`, or `/strategy-templates` |
+| `userId` | every row here belongs to the caller |
+| `symbolId`, `instrumentType` | `GET /api/v1/symbols`; `exchangeCode` + `symbol` identify the row |
 
 ### 8.3 The FUTURES variant
 
