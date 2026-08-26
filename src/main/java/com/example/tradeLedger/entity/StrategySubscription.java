@@ -37,8 +37,8 @@ import java.util.UUID;
                 columnNames = {"user_strategy_id", "trading_account_id"}))
 public class StrategySubscription {
 
-    public static final String MODE_PAPER = "paper";
-    public static final String MODE_LIVE = "live";
+    public static final String MODE_PAPER = "Paper";
+    public static final String MODE_LIVE = "Live";
 
     public static final String EXEC_FIXED_QTY = "FIXED_QTY";
     public static final String EXEC_CAPITAL_PERCENT = "CAPITAL_PERCENT";
@@ -90,7 +90,7 @@ public class StrategySubscription {
     @Column(name = "execution_mode", nullable = false, length = 20)
     private String executionMode = EXEC_FIXED_QTY;
 
-    /** paper | live - decided per account, so one broker can go live before the rest. */
+    /** Paper | Live - decided per account, so one broker can go live before the rest. */
     @Column(name = "trade_mode", nullable = false, length = 10)
     private String tradeMode = MODE_PAPER;
 

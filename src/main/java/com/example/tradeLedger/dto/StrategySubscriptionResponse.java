@@ -127,7 +127,7 @@ public record StrategySubscriptionResponse(
                 allowableValues = {"FIXED_QTY", "CAPITAL_PERCENT", "RISK_PERCENT"})
         String executionMode,
 
-        @Schema(example = "paper", allowableValues = {"paper", "live"})
+        @Schema(example = "Paper", allowableValues = {"Paper", "Live"})
         String tradeMode,
 
         @Schema(example = "true")

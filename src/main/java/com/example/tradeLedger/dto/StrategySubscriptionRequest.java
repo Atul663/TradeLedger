@@ -50,7 +50,7 @@ public class StrategySubscriptionRequest {
             defaultValue = "FIXED_QTY")
     private String executionMode;
 
-    @Schema(example = "paper", allowableValues = {"paper", "live"}, defaultValue = "paper")
+    @Schema(example = "Paper", allowableValues = {"Paper", "Live"}, defaultValue = "Paper")
     private String tradeMode;
 
     public UUID getUserStrategyId() { return userStrategyId; }

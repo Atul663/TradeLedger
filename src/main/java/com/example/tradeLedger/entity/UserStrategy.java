@@ -209,7 +209,7 @@ public class UserStrategy {
     private BigDecimal capitalAllocated;
 
     /**
-     * paper | live.
+     * Paper | Live.
      *
      * Defaults to paper, and stays paper unless the author says otherwise - a
      * strategy that silently deployed live because a field was left unset is the

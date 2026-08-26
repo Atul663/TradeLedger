@@ -125,7 +125,7 @@ public record UserStrategyResponse(
         @Schema(description = "Null when nothing is earmarked.", example = "500000.00000000")
         BigDecimal capitalAllocated,
 
-        @Schema(example = "paper", allowableValues = {"paper", "live"})
+        @Schema(example = "Paper", allowableValues = {"Paper", "Live"})
         String tradeMode,
 
         // --------------------------------------------------------- indicators

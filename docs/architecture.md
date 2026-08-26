@@ -385,7 +385,7 @@ account once; deploying it again is an edit.
 | `multiplier` | Scales the strategy's `base_lot` on this account alone |
 | `capital_allocated` | For the percent-based execution modes |
 | `execution_mode` | `FIXED_QTY` / `CAPITAL_PERCENT` / `RISK_PERCENT` |
-| `trade_mode` | `paper` / `live` — one broker can go live while the rest do not |
+| `trade_mode` | `Paper` / `Live` — one broker can go live while the rest do not |
 | `is_active` | Pause one broker without touching the strategy or the others |
 
 **The configuration is not copied here.** A deployment reaches its instrument,
@@ -524,9 +524,9 @@ Every other endpoint expects `Authorization: Bearer <accessToken>`.
 ### 6.3 Deploy to many brokers — `POST /api/v1/my-strategies/{id}/deploy`
 
 ```
- { "tradeMode":"paper",
+ { "tradeMode": "Paper",
    "targets":[ {"tradingAccountId":"…"},
-               {"tradingAccountId":"…", "multiplier":2, "tradeMode":"live"},
+               {"tradingAccountId":"…", "multiplier":2, "tradeMode": "Live"},
                {"userBrokerId":"…"} ] }          ← fans out to all its accounts
 
  expand()   target → account(s), ownership-checked
@@ -561,7 +561,7 @@ strategy was authored without repeating itself, and a call that names a value
 still wins. **The flow is one-way and once.** The deployment copies these four at
 creation; editing them on the strategy afterwards does not reach it — the opposite
 of the configuration fields, which every deployment follows because it points at
-the row rather than copying it. A strategy that never set them deploys `paper`
+the row rather than copying it. A strategy that never set them deploys `Paper`
 at 1×, so an unset field can never be why an order reaches a broker live.
 
 ### 6.4 Retune — `PUT /api/v1/my-strategies/{id}`

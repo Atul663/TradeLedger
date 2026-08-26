@@ -24,7 +24,7 @@
 --
 -- The values chosen here are the same ones the entity defaults to, so every
 -- existing strategy comes out of this migration deploying exactly the way it
--- deployed before it: FIXED_QTY, 1x, no earmarked capital, and PAPER. Nothing
+-- deployed before it: FIXED_QTY, 1x, no earmarked capital, and Paper. Nothing
 -- goes live because a column appeared.
 -- ============================================================================
 
@@ -39,7 +39,7 @@ BEGIN
     ADD COLUMN IF NOT EXISTS execution_mode    varchar(20)   NOT NULL DEFAULT 'FIXED_QTY',
     ADD COLUMN IF NOT EXISTS multiplier        numeric(20,8) NOT NULL DEFAULT 1,
     ADD COLUMN IF NOT EXISTS capital_allocated numeric(20,8),
-    ADD COLUMN IF NOT EXISTS trade_mode        varchar(10)   NOT NULL DEFAULT 'paper';
+    ADD COLUMN IF NOT EXISTS trade_mode        varchar(10)   NOT NULL DEFAULT 'Paper';
 
   -- The same CHECKs user_strategy_subscriptions carries, so the strategy cannot
   -- hold a default the deployment it seeds would refuse.
@@ -56,7 +56,7 @@ BEGIN
                    AND conname = 'ck_user_strategies_trade_mode') THEN
     ALTER TABLE user_strategies
       ADD CONSTRAINT ck_user_strategies_trade_mode
-      CHECK (trade_mode IN ('paper','live'));
+      CHECK (trade_mode IN ('Paper','Live'));
   END IF;
 
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -81,4 +81,4 @@ $$;
 --   FROM information_schema.columns
 --   WHERE table_name = 'user_strategies'
 --     AND column_name IN ('execution_mode','multiplier','capital_allocated','trade_mode');
---   -- expect 4 rows; trade_mode defaults to 'paper'
+--   -- expect 4 rows; trade_mode defaults to 'Paper'

@@ -247,7 +247,7 @@ class DeploymentDefaultsTest {
     void theModesAreNormalizedToWhatADeploymentHolds() {
         assertEquals(StrategySubscription.EXEC_RISK_PERCENT,
                 UserStrategyValidator.executionMode("risk_percent"));
-        assertEquals(StrategySubscription.MODE_LIVE, UserStrategyValidator.tradeMode("LIVE"));
+        assertEquals(StrategySubscription.MODE_LIVE, UserStrategyValidator.tradeMode("live"));
         assertNull(UserStrategyValidator.tradeMode(null), "absent is left alone, not defaulted");
         assertNull(UserStrategyValidator.tradeMode("  "));
     }
@@ -257,7 +257,7 @@ class DeploymentDefaultsTest {
         var thrown = org.junit.jupiter.api.Assertions.assertThrows(
                 com.example.tradeLedger.exception.StrategyValidationException.class,
                 () -> UserStrategyValidator.tradeMode("demo"));
-        org.junit.jupiter.api.Assertions.assertTrue(thrown.getMessage().contains("paper"),
+        org.junit.jupiter.api.Assertions.assertTrue(thrown.getMessage().contains("Paper"),
                 thrown.getMessage());
     }
 

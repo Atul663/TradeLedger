@@ -204,7 +204,7 @@ public class UserStrategyController extends SecuredController {
                                               "executionMode": "CAPITAL_PERCENT",
                                               "multiplier": 2,
                                               "capitalAllocated": 500000,
-                                              "tradeMode": "live"
+                                              "tradeMode": "Live"
                                             }"""),
                             @ExampleObject(name = "Minimal - template only",
                                     description = "Valid, and saves on platform defaults. Not "
@@ -323,11 +323,11 @@ public class UserStrategyController extends SecuredController {
                                             + "setup - what \"deploy it on my Dhan\" means when "
                                             + "the login carries three sub-accounts.",
                                     value = """
-                                            { "tradeMode": "paper",
+                                            { "tradeMode": "Paper",
                                               "targets": [ { "userBrokerId": "ub000000-1111-4222-8333-444444444444" } ] }"""),
                             @ExampleObject(name = "One account",
                                     value = """
-                                            { "tradeMode": "paper",
+                                            { "tradeMode": "Paper",
                                               "multiplier": 1,
                                               "targets": [ { "tradingAccountId": "ta000000-1111-4222-8333-444444444444" } ] }"""),
                             @ExampleObject(name = "Several brokers, per-broker overrides",
@@ -336,7 +336,7 @@ public class UserStrategyController extends SecuredController {
                                             + "runs on paper at 1x except one account, live at 2x.",
                                     value = """
                                             {
-                                              "tradeMode": "paper",
+                                              "tradeMode": "Paper",
                                               "multiplier": 1,
                                               "executionMode": "FIXED_QTY",
                                               "riskProfileId": "4f5e6d7c-8b9a-4c1d-9e2f-3a4b5c6d7e8f",
@@ -344,7 +344,7 @@ public class UserStrategyController extends SecuredController {
                                                 { "userBrokerId": "ub000000-1111-4222-8333-444444444444" },
                                                 { "tradingAccountId": "ta000000-1111-4222-8333-999999999999",
                                                   "multiplier": 2,
-                                                  "tradeMode": "live" }
+                                                  "tradeMode": "Live" }
                                               ]
                                             }""")
                     }))

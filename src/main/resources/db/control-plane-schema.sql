@@ -679,8 +679,8 @@ CREATE TABLE IF NOT EXISTS user_strategy_subscriptions (
   exec_params          jsonb NOT NULL DEFAULT '{}'::jsonb,
                        -- {"sl_pct":1.5,"tp_pct":3.0,"trailing":...} - personal,
                        -- execution-scope keys only, NEVER part of any hash
-  trade_mode           varchar(10) NOT NULL DEFAULT 'paper'
-                       CHECK (trade_mode IN ('paper','live')),
+  trade_mode           varchar(10) NOT NULL DEFAULT 'Paper'
+                       CHECK (trade_mode IN ('Paper','Live')),
   is_active            boolean NOT NULL DEFAULT true,
   version              int NOT NULL DEFAULT 1,
   created_at           timestamptz NOT NULL DEFAULT now(),

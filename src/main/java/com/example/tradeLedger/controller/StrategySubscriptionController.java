@@ -71,7 +71,7 @@ public class StrategySubscriptionController extends SecuredController {
                                     value = """
                                             { "userStrategyId": "us000000-1111-4222-8333-444444444444",
                                               "tradingAccountId": "ta000000-1111-4222-8333-444444444444",
-                                              "tradeMode": "paper" }"""),
+                                              "tradeMode": "Paper" }"""),
                             @ExampleObject(name = "Live at double size, under a risk profile",
                                     value = """
                                             { "userStrategyId": "us000000-1111-4222-8333-444444444444",
@@ -80,7 +80,7 @@ public class StrategySubscriptionController extends SecuredController {
                                               "multiplier": 2,
                                               "capitalAllocated": 500000,
                                               "executionMode": "CAPITAL_PERCENT",
-                                              "tradeMode": "live" }""")
+                                              "tradeMode": "Live" }""")
                     }))
     public StrategySubscriptionResponse create(@RequestBody StrategySubscriptionRequest request) {
         String email = currentEmail();
@@ -107,7 +107,7 @@ public class StrategySubscriptionController extends SecuredController {
                     examples = {
                             @ExampleObject(name = "Go live at double size",
                                     value = """
-                                            { "tradeMode": "live", "multiplier": 2 }"""),
+                                            { "tradeMode": "Live", "multiplier": 2 }"""),
                             @ExampleObject(name = "Pause this broker",
                                     description = "Keeps the configuration. The shared computation "
                                             + "is retired once its last active deployment pauses.",

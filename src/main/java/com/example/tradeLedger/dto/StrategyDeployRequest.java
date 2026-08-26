@@ -55,7 +55,7 @@ public class StrategyDeployRequest {
 
     @Schema(description = "Default trade mode. Deploy everything on paper first, then flip "
             + "one broker live with a per-target override.",
-            example = "paper", allowableValues = {"paper", "live"}, defaultValue = "paper")
+            example = "Paper", allowableValues = {"Paper", "Live"}, defaultValue = "Paper")
     private String tradeMode;
 
     /**
@@ -92,7 +92,7 @@ public class StrategyDeployRequest {
 
         @Schema(description = "Overrides the request-level trade mode - take one broker live "
                 + "while the rest stay on paper.",
-                example = "live", allowableValues = {"paper", "live"})
+                example = "Live", allowableValues = {"Paper", "Live"})
         private String tradeMode;
 
         public UUID getTradingAccountId() { return tradingAccountId; }

@@ -321,10 +321,10 @@ public class ControlPlaneSeeder implements ApplicationRunner {
                         {"min":0}""", false,
                 "What the percent execution modes are a percent OF.");
         seedFixedParameter(GROUP_DEPLOYMENT, 4, "tradeMode", "Trade mode",
-                FixedParameter.TYPE_ENUM, FixedParameter.SCOPE_EXECUTION, "paper",
+                FixedParameter.TYPE_ENUM, FixedParameter.SCOPE_EXECUTION, "Paper",
                 """
-                        {"options":["paper","live"]}""", true,
-                "paper places nothing with the broker. The default, deliberately.");
+                        {"options":["Paper","Live"]}""", true,
+                "Paper places nothing with the broker. The default, deliberately.");
     }
 
     /**

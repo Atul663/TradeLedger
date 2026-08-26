@@ -35,7 +35,7 @@ public class StrategySubscriptionUpdateRequest {
     private String executionMode;
 
     @Schema(description = "One broker can go live while the rest stay on paper.",
-            example = "live", allowableValues = {"paper", "live"})
+            example = "Live", allowableValues = {"Paper", "Live"})
     private String tradeMode;
 
     @Schema(example = "4f5e6d7c-8b9a-4c1d-9e2f-3a4b5c6d7e8f")

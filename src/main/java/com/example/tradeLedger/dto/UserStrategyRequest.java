@@ -144,7 +144,7 @@ public class UserStrategyRequest {
 
     @Schema(description = "Default trade mode for a deployment of this strategy. Stays paper "
             + "unless you say otherwise.",
-            example = "paper", allowableValues = {"paper", "live"}, defaultValue = "paper")
+            example = "Paper", allowableValues = {"Paper", "Live"}, defaultValue = "Paper")
     private String tradeMode;
 
     // --------------------------------------------------------- the indicators

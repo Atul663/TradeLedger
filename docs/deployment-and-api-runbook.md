@@ -129,6 +129,35 @@ It drops the stale constraint, moves `'FUT'` rows to `'FUTURES'`, and adds
 something to be written against. A guarded no-op on a database created after the
 rename.
 
+### ⚠️ If you already have strategies: run the trade-mode casing migration
+
+`trade_mode` was stored lower case — `paper` / `live` — while the value a form
+displays is `Paper` / `Live`. A caller sending `"Paper"` got `"paper"` back, and a
+select offering `Paper` could not display the value its own field reported. The
+stored form is now the displayed form.
+
+Three places hold it and all three move together: `user_strategies.trade_mode`,
+`user_strategy_subscriptions.trade_mode`, and the `tradeMode` row in
+`fixed_parameters` that a form builds its select from. Each column carries a CHECK
+naming the old spelling, and `ddl-auto=update` will not revisit it — the same trap
+as the derivative rename above.
+
+Run this ONCE **before** booting the new build; the application writes `Paper`
+from the moment it starts and the old CHECK would refuse it:
+
+```bash
+psql "$DB_URL" -f src/main/resources/db/trade-mode-casing-migration.sql
+```
+
+**Nothing goes live because of this.** `paper` becomes `Paper` and `live` becomes
+`Live`; no row changes which of the two it holds. Guarded and idempotent.
+
+**Frontend:** the API now both accepts and returns `Paper` / `Live`. Input is
+still case-insensitive — `paper`, `PAPER` and `Paper` all save — so a client that
+sends the old spelling keeps working, but anything comparing a *response* against
+`'paper'` needs updating. See `docs/strategy-builder-ui-api.md`, where
+`type TradeMode` now reads `'Paper' | 'Live'`.
+
 ### Environment variables
 
 | Variable | Required | Effect if missing |
@@ -883,7 +912,7 @@ Authorization: Bearer {{TOKEN}}
 | `executionMode` | enum | `FIXED_QTY` | `FIXED_QTY` \| `CAPITAL_PERCENT` \| `RISK_PERCENT`; **deployment default** |
 | `multiplier` | decimal(20,8) | `1` | ≥ 0; **deployment default** |
 | `capitalAllocated` | decimal(20,8) | `null` | ≥ 0; **deployment default** |
-| `tradeMode` | enum | `paper` | `paper` \| `live`; **deployment default** |
+| `tradeMode` | enum | `Paper` | `Paper` \| `Live`; **deployment default** |
 | `indicators[]` | array | schema defaults | see below |
 | `active` | bool | `true` | archive without deleting |
 
@@ -892,7 +921,7 @@ differently from everything above them. They are what a deployment of this
 strategy *starts on* when `POST /{id}/deploy` does not name a value — copied once,
 at deploy time. **Editing them later does not reach a deployment that already
 exists**, which is the opposite of every other field here. Leave them alone and
-the strategy deploys `paper` at 1×.
+the strategy deploys `Paper` at 1×.
 
 `indicators[]` entry: `{ "indicatorName", "slot"?, "params"?, "enabled"? }` — the
 same shape a read returns, so send back the entry you read with the params you
@@ -934,7 +963,7 @@ Enums parse case-insensitively (`"otm"` works), but send the canonical form.
   "executionMode": "FIXED_QTY",
   "multiplier": 1.00000000,
   "capitalAllocated": null,
-  "tradeMode": "paper",
+  "tradeMode": "Paper",
 
   "indicators": [
     { "indicatorName": "EMA Averaging",
@@ -1167,7 +1196,7 @@ broker is *skipped*, not refused, and does not stop the others being cleared:
 POST {{BASE}}/api/v1/my-strategies/{{id}}/deploy
 Authorization: Bearer {{TOKEN}}
 
-{ "tradeMode": "paper",
+{ "tradeMode": "Paper",
   "multiplier": 1,
   "executionMode": "FIXED_QTY",
   "riskProfileId": "4f5e6d7c-0000-0000-0000-0000000000b1",
@@ -1176,7 +1205,7 @@ Authorization: Bearer {{TOKEN}}
     { "userBrokerId": "ub000000-0000-0000-0000-000000000001" },
     { "tradingAccountId": "ta000000-0000-0000-0000-000000000009",
       "multiplier": 2,
-      "tradeMode": "live" } ] }
+      "tradeMode": "Live" } ] }
 ```
 
 - a target names **one account** (`tradingAccountId`) **or a whole setup**
@@ -1184,7 +1213,7 @@ Authorization: Bearer {{TOKEN}}
 - per-target overridable: `riskProfileId`, `multiplier`, `capitalAllocated`,
   `executionMode`, `tradeMode`;
 - `executionMode` ∈ `FIXED_QTY` · `CAPITAL_PERCENT` · `RISK_PERCENT`;
-  `tradeMode` ∈ `paper` · `live`;
+  `tradeMode` ∈ `Paper` · `Live`;
 - **no configuration in this body** — it comes from the strategy, which is what
   makes every broker feed off one shared computation.
 
@@ -1276,7 +1305,7 @@ POST {{BASE}}/api/v1/my-subscriptions
   "multiplier": 1,
   "capitalAllocated": 200000,
   "executionMode": "FIXED_QTY",
-  "tradeMode": "paper" }
+  "tradeMode": "Paper" }
 ```
 
 **201**
@@ -1314,7 +1343,7 @@ POST {{BASE}}/api/v1/my-subscriptions
   "multiplier": 1.00000000,
   "capitalAllocated": 200000.00000000,
   "executionMode": "FIXED_QTY",
-  "tradeMode": "paper",
+  "tradeMode": "Paper",
 
   "active": true,
   "createdAt": "…", "updatedAt": "…" }
@@ -1327,7 +1356,7 @@ strategy**, not stored here — it changes the moment the strategy is retuned.
 
 ```http
 PUT {{BASE}}/api/v1/my-subscriptions/{{id}}
-{ "tradeMode": "live", "multiplier": 2 }
+{ "tradeMode": "Live", "multiplier": 2 }
 ```
 
 Accepts only: `multiplier`, `capitalAllocated`, `executionMode`, `tradeMode`,
@@ -1479,7 +1508,7 @@ US=$(curl -s "${H[@]}" -X POST "$BASE/api/v1/my-strategies" -d '{
 
 # 5. deploy to every account under the setup
 curl -s "${H[@]}" -X POST "$BASE/api/v1/my-strategies/$US/deploy" \
-  -d "{\"tradeMode\":\"paper\",\"targets\":[{\"userBrokerId\":\"$UB\"}]}" | jq '.deployed,.failed'
+  -d "{\"tradeMode\":\"Paper\",\"targets\":[{\"userBrokerId\":\"$UB\"}]}" | jq '.deployed,.failed'
 
 # 6. retune — every broker follows
 curl -s "${H[@]}" -X PUT "$BASE/api/v1/my-strategies/$US" \

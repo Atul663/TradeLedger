@@ -118,7 +118,7 @@ Hardcode these. They are Java enums and database CHECK constraints.
 type Derivative    = 'FUTURES' | 'OPTION';
 type Moneyness     = 'ATM' | 'ITM' | 'OTM';
 type LotRule       = 'FIXED' | 'DOUBLE' | 'CUMULATIVE';
-type TradeMode     = 'paper' | 'live';
+type TradeMode     = 'Paper' | 'Live';
 type ExecutionMode = 'FIXED_QTY' | 'CAPITAL_PERCENT' | 'RISK_PERCENT';
 type InstanceStatus= 'active' | 'retired';
 type InstrumentType= 'spot' | 'future' | 'option' | 'index';
@@ -315,7 +315,7 @@ means the column default.
 | `executionMode` | `FIXED_QTY` | deployment default — `FIXED_QTY` / `CAPITAL_PERCENT` / `RISK_PERCENT` |
 | `multiplier` | `1` | deployment default — ≥ 0 |
 | `capitalAllocated` | `null` | deployment default — ≥ 0 |
-| `tradeMode` | `paper` | deployment default — `paper` / `live` |
+| `tradeMode` | `Paper` | deployment default — `Paper` / `Live` |
 | `indicators[].params` | schema defaults | **merged** over what is stored |
 | `active` | `true` | archive without deleting |
 
@@ -353,7 +353,7 @@ any read.
   "slPct": 1.50, "tpPct": 3.00,
 
   "executionMode": "FIXED_QTY", "multiplier": 1.00000000,
-  "capitalAllocated": null, "tradeMode": "paper",
+  "capitalAllocated": null, "tradeMode": "Paper",
 
   "indicators": [ {
       "indicatorName": "EMA Averaging", "slot": null,
@@ -461,9 +461,9 @@ hashed. Also carries `ruleTree`, `derivative`, `lotRule`, `baseLot`,
 ### 5.5 `POST /api/v1/my-strategies/{id}/deploy`
 
 ```json
-{ "tradeMode": "paper", "multiplier": 1,
+{ "tradeMode": "Paper", "multiplier": 1,
   "targets": [ { "tradingAccountId": "acc-1" },
-               { "tradingAccountId": "acc-2", "multiplier": 2, "tradeMode": "live" },
+               { "tradingAccountId": "acc-2", "multiplier": 2, "tradeMode": "Live" },
                { "userBrokerId": "brk-9" } ] }
 ```
 
@@ -575,7 +575,7 @@ POST /api/v1/my-strategies
 → 201, deployable: true
 
 POST /api/v1/my-strategies/{id}/deploy
-{ "tradeMode": "paper",
+{ "tradeMode": "Paper",
   "targets": [ {"userBrokerId": "<my Dhan>"}, {"tradingAccountId": "<Zerodha main>"} ] }
 → 200, deployed: 3, failed: 0
 ```

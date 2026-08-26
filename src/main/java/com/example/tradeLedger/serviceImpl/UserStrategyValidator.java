@@ -63,30 +63,39 @@ public class UserStrategyValidator {
      *
      * They are normalized here rather than parsed as enums because the values a
      * DEPLOYMENT stores are strings - {@code user_strategy_subscriptions} holds
-     * 'paper' and 'FIXED_QTY' verbatim - and a strategy's default has to come out
+     * 'Paper' and 'FIXED_QTY' verbatim - and a strategy's default has to come out
      * of this in exactly the form the deployment will hold, casing included.
      * Null in, null out: an absent field is left alone, like every other one.
      */
     public static String executionMode(String value) {
-        return oneOf(value, "executionMode", EXECUTION_MODES, true);
+        return oneOf(value, "executionMode", EXECUTION_MODES);
     }
 
     public static String tradeMode(String value) {
-        return oneOf(value, "tradeMode", TRADE_MODES, false);
+        return oneOf(value, "tradeMode", TRADE_MODES);
     }
 
-    private static String oneOf(String value, String field, List<String> allowed, boolean upper) {
+    /**
+     * Case-insensitive in, the canonical spelling out.
+     *
+     * The canonical form is looked UP in the allowed list rather than produced by
+     * transforming case, because the two fields do not share a convention:
+     * executionMode is stored 'FIXED_QTY' and tradeMode 'Paper'. Whatever the list
+     * holds is what the column holds, so a third field with a third convention
+     * needs no code here - only its entry in the list.
+     */
+    private static String oneOf(String value, String field, List<String> allowed) {
         if (value == null || value.isBlank()) {
             return null;
         }
-        String normalized = upper
-                ? value.trim().toUpperCase(Locale.ROOT)
-                : value.trim().toLowerCase(Locale.ROOT);
-        if (!allowed.contains(normalized)) {
-            throw new StrategyValidationException(
-                    field + " must be one of " + allowed + ", got '" + value + "'");
+        String trimmed = value.trim();
+        for (String candidate : allowed) {
+            if (candidate.equalsIgnoreCase(trimmed)) {
+                return candidate;
+            }
         }
-        return normalized;
+        throw new StrategyValidationException(
+                field + " must be one of " + allowed + ", got '" + value + "'");
     }
 
     /**
