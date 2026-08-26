@@ -96,6 +96,39 @@ capital, **paper**. Nothing goes live because a column appeared.
 Skip it only if you dropped the tables above, or the database is new — and it is a
 guarded no-op in both cases anyway.
 
+### ⚠️ If you already have strategies: run the derivative-rename migration
+
+`Derivative.FUT` was renamed to `Derivative.FUTURES`. Hibernate emits a CHECK
+constraint for every `@Enumerated(EnumType.STRING)` column listing the constant
+names **as they were when the column was created**, and `ddl-auto=update` never
+revisits a constraint that already exists — it only adds missing tables and
+columns. So a database created before the rename still enforces:
+
+```sql
+CHECK (derivative IN ('FUT','OPTION'))
+```
+
+Every futures strategy then fails to save with a 409, while `OPTION` keeps
+working:
+
+```json
+{ "error": "Request conflicts with existing data (user_strategies_derivative_check)" }
+```
+
+Rows written before the rename also still hold `'FUT'`, which maps to no enum
+constant — reading one throws.
+
+Run this ONCE before booting the new build:
+
+```bash
+psql "$DB_URL" -f src/main/resources/db/user-strategies-derivative-rename-migration.sql
+```
+
+It drops the stale constraint, moves `'FUT'` rows to `'FUTURES'`, and adds
+`ck_user_strategies_derivative` under a name of our own so the next rename has
+something to be written against. A guarded no-op on a database created after the
+rename.
+
 ### Environment variables
 
 | Variable | Required | Effect if missing |
