@@ -4,6 +4,7 @@ import com.example.tradeLedger.dto.StrategyDeployRequest;
 import com.example.tradeLedger.dto.StrategyDeploymentResponse;
 import com.example.tradeLedger.dto.StrategySubscriptionRequest;
 import com.example.tradeLedger.dto.StrategySubscriptionResponse;
+import com.example.tradeLedger.dto.UserStrategyBulkDeleteResponse;
 import com.example.tradeLedger.dto.UserStrategyGroupResponse;
 import com.example.tradeLedger.dto.UserStrategyIndicatorGroupResponse;
 import com.example.tradeLedger.dto.UserStrategyIndicatorResponse;
@@ -46,8 +47,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
 
@@ -589,9 +592,7 @@ public class UserStrategyServiceImpl implements UserStrategyService {
         // first - a cascade here would silently stop trading on every broker.
         long deployments = subscriptionRepository.countByUserStrategy_Id(id);
         if (deployments > 0) {
-            throw new ResourceConflictException("Strategy " + strategy.getName() + " is deployed on "
-                    + deployments + " account(s). Withdraw those deployments first, or archive it with "
-                    + "PUT /api/v1/my-strategies/" + id + " {\"active\":false}.");
+            throw new ResourceConflictException(stillDeployed(strategy, deployments));
         }
 
         SharedStrategyConfig config = strategy.getSharedConfig();
@@ -601,6 +602,70 @@ public class UserStrategyServiceImpl implements UserStrategyService {
             sharedConfigService.retireIfOrphaned(config.getId());
         }
         log.info("DELETE strategy={} {} | user={}", id, strategy.getName(), email);
+    }
+
+    @Override
+    @Transactional
+    public UserStrategyBulkDeleteResponse deleteAll(String email, Boolean active, UUID strategyId) {
+        List<UserStrategy> rows = ownedRows(email, active, strategyId);
+        if (rows.isEmpty()) {
+            log.info("DELETE-ALL matched nothing active={} template={} | user={}", active, strategyId, email);
+            return new UserStrategyBulkDeleteResponse(0, 0, 0, List.of());
+        }
+
+        // One question for the whole sweep rather than one per row - the same
+        // batched count the list responses use.
+        Map<UUID, Long> deploymentCounts = counts(subscriptionRepository.countByUserStrategyIds(
+                rows.stream().map(UserStrategy::getId).toList()));
+
+        // Every deleted row's computation, deduplicated: several of these rows can
+        // share one, and it is only retired once, after the deletes have hit the
+        // database - otherwise it still looks occupied by rows about to vanish.
+        Set<UUID> touchedConfigs = new LinkedHashSet<>();
+        List<UserStrategyBulkDeleteResponse.Item> results = new ArrayList<>(rows.size());
+        int deleted = 0;
+        int skipped = 0;
+
+        for (UserStrategy strategy : rows) {
+            StrategyTemplate template = strategy.getStrategy();
+            long deployments = deploymentCounts.getOrDefault(strategy.getId(), 0L);
+
+            // Deployments hold a FK to this row. One that is still live is left
+            // standing rather than failing the sweep, so clearing ten strategies
+            // is not blocked by the one broker still running an eleventh.
+            if (deployments > 0) {
+                results.add(new UserStrategyBulkDeleteResponse.Item(
+                        strategy.getId(), strategy.getName(), template.getId(), template.getName(),
+                        UserStrategyBulkDeleteResponse.STATUS_SKIPPED, deployments,
+                        stillDeployed(strategy, deployments)));
+                skipped++;
+                continue;
+            }
+
+            if (strategy.getSharedConfig() != null) {
+                touchedConfigs.add(strategy.getSharedConfig().getId());
+            }
+            results.add(new UserStrategyBulkDeleteResponse.Item(
+                    strategy.getId(), strategy.getName(), template.getId(), template.getName(),
+                    UserStrategyBulkDeleteResponse.STATUS_DELETED, 0L, null));
+            userStrategyRepository.delete(strategy);
+            deleted++;
+        }
+
+        userStrategyRepository.flush();
+        for (UUID configId : touchedConfigs) {
+            sharedConfigService.retireIfOrphaned(configId);
+        }
+        log.info("DELETE-ALL strategies deleted={} skipped={} active={} template={} | user={}",
+                deleted, skipped, active, strategyId, email);
+        return new UserStrategyBulkDeleteResponse(rows.size(), deleted, skipped, results);
+    }
+
+    /** The one sentence both delete paths tell a caller about a live deployment. */
+    private static String stillDeployed(UserStrategy strategy, long deployments) {
+        return "Strategy " + strategy.getName() + " is deployed on " + deployments
+                + " account(s). Withdraw those deployments first, or archive it with "
+                + "PUT /api/v1/my-strategies/" + strategy.getId() + " {\"active\":false}.";
     }
 
     // --------------------------------------------------------------- deploy

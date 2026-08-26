@@ -573,6 +573,14 @@ never deleted — when its last active deployment goes, so lineage survives.
 points at it (409, with the count). Cascading would silently stop trading on every
 broker.
 
+`DELETE /api/v1/my-strategies` sweeps the caller's strategies under the same
+`active` / `strategyId` filters the list takes. Same rule, reported rather than
+thrown: a strategy that is still deployed is **skipped**, the rest are cleared,
+and each one comes back in `results[]` as `deleted` or `skipped` — with the
+sentence the single-strategy DELETE would have returned. Deployment counts are
+read in one batched query, and each freed instance is retired once, after the
+deletes have been flushed.
+
 ### 6.6 The dedup report — `GET /api/v1/shared-strategy-configs/indicator-plan`
 
 Walks every active instance, sums active deployments, and unions their resolved
@@ -705,6 +713,7 @@ All strategy-module endpoints require `Authorization: Bearer <accessToken>`.
 | POST | `/api/v1/strategy-templates` | 201, `is_system` forced false |
 | PUT / DELETE | `/api/v1/strategy-templates/{id}` | 409 on system rows; rule tree frozen once strategies exist |
 | GET/POST | `/api/v1/my-strategies` | The caller's strategies, ownership-filtered |
+| DELETE | `/api/v1/my-strategies?active=&strategyId=` | **Bulk delete** under the list's own filters. Still-deployed strategies are **skipped, not refused**; per-strategy outcome in `results[]` |
 | GET | `/api/v1/my-strategies/grouped?active=&strategyId=` | The same **complete** rows, one group per template, each tagged with `strategyName`, `strategyDescription`, `strategySystem` and `instanceCount`. One mapper builds both shapes, so a grouped row can never carry less than a flat one |
 | GET/PUT/DELETE | `/api/v1/my-strategies/{id}` | Editor shape: the flat fields, plus the same content arranged as `indicatorGroups[]` (by indicator name) and `fixedParameters[]` (by `paramGroup`, descriptor + value). Writes address the flat names. Another user's row reports **404, not 403** |
 | GET | `/api/v1/my-strategies/{id}/runtime` | Bot shape: legs resolved, values coerced |

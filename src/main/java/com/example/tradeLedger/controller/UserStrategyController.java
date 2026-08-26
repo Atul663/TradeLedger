@@ -2,6 +2,7 @@ package com.example.tradeLedger.controller;
 
 import com.example.tradeLedger.dto.StrategyDeployRequest;
 import com.example.tradeLedger.dto.StrategyDeploymentResponse;
+import com.example.tradeLedger.dto.UserStrategyBulkDeleteResponse;
 import com.example.tradeLedger.dto.UserStrategyGroupResponse;
 import com.example.tradeLedger.dto.UserStrategyRequest;
 import com.example.tradeLedger.dto.UserStrategyResponse;
@@ -246,6 +247,32 @@ public class UserStrategyController extends SecuredController {
         log.info("DELETE strategy={} | user={}", id, email);
         userStrategyService.delete(email, id);
         return ResponseEntity.noContent().build();
+    }
+
+    @DeleteMapping
+    @Operation(summary = "Delete all the caller's strategies; deployed ones are skipped",
+            description = """
+                    Takes the SAME filters as the list - no filter clears everything the caller \
+                    owns, `active=false` clears only the archived ones, `strategyId` clears only \
+                    what was built from that template.
+
+                    **A strategy still deployed on a broker is skipped, not deleted** - a \
+                    deployment holds a reference to the row, and cascading through it would \
+                    silently stop trading. It does not fail the sweep either: the other \
+                    strategies are still cleared, and each one reports its own outcome.
+
+                    The status is 200 whenever the request was well-formed, even if every \
+                    strategy was skipped. Read `deleted` / `skipped` for the summary and \
+                    `results[]` for which strategy was which, with the same sentence the \
+                    single-strategy DELETE would have returned. This cannot be undone.""")
+    public UserStrategyBulkDeleteResponse deleteAll(
+            @Parameter(description = "true for live, false for archived, omit for all")
+            @RequestParam(required = false) Boolean active,
+            @Parameter(description = "Only strategies built from this template")
+            @RequestParam(required = false) UUID strategyId) {
+        String email = currentEmail();
+        log.info("DELETE all strategies active={} template={} | user={}", active, strategyId, email);
+        return userStrategyService.deleteAll(email, active, strategyId);
     }
 
     @PostMapping("/{id}/deploy")

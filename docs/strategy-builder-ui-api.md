@@ -506,6 +506,13 @@ plus `signalParams`, `indicators[]` (resolved fingerprints), `configHash`, and
 **409 while any deployment exists** — withdraw them first, or archive with
 `{"active": false}`.
 
+`DELETE /api/v1/my-strategies` clears them in bulk, under the same `active` and
+`strategyId` filters the list takes. It is **always 200**: a strategy that is
+still deployed is *skipped* instead of blocking the sweep. Draw the result from
+`results[]` — each row is `deleted` or `skipped`, and a skipped one carries the
+same sentence the single-strategy DELETE would have shown, so a "3 of 5 deleted,
+2 still deployed" panel needs no extra call. Confirm before calling: no undo.
+
 > **Precision.** `multiplier`, `capitalAllocated` and the risk limits are
 > `numeric(20,8)` and arrive as JSON numbers. Don't do arithmetic on them for
 > exact display.

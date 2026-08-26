@@ -1045,6 +1045,39 @@ DELETE {{BASE}}/api/v1/my-strategies/{{id}}      → 204
 { "error": "Strategy NIFTY 21/9 both sides is deployed on 3 account(s). Withdraw those deployments first, or archive it with PUT /api/v1/my-strategies/us000000-… {\"active\":false}." }
 ```
 
+### 8.8 Delete them all
+
+Same filters as the list — omit both to clear everything the caller owns.
+
+```http
+DELETE {{BASE}}/api/v1/my-strategies                          → 200
+DELETE {{BASE}}/api/v1/my-strategies?active=false             # only the archived ones
+DELETE {{BASE}}/api/v1/my-strategies?strategyId={{templateId}} # only that template's
+```
+
+**200, even when nothing could be deleted.** A strategy still deployed on a
+broker is *skipped*, not refused, and does not stop the others being cleared:
+
+```json
+{
+  "requested": 3,
+  "deleted": 2,
+  "skipped": 1,
+  "results": [
+    { "id": "us000000-…", "name": "NIFTY calls OTM5", "strategyId": "1a2b3c4d-…",
+      "strategyName": "EMA Averaging", "status": "deleted", "deployments": 0, "error": null },
+    { "id": "us111111-…", "name": "NIFTY futures 50/21", "strategyId": "1a2b3c4d-…",
+      "strategyName": "EMA Averaging", "status": "deleted", "deployments": 0, "error": null },
+    { "id": "us222222-…", "name": "NIFTY 21/9 both sides", "strategyId": "1a2b3c4d-…",
+      "strategyName": "EMA Averaging", "status": "skipped", "deployments": 3,
+      "error": "Strategy NIFTY 21/9 both sides is deployed on 3 account(s). Withdraw those deployments first, or archive it with PUT /api/v1/my-strategies/us222222-… {\"active\":false}." }
+  ]
+}
+```
+
+> Read `results[]`, not the status code — `deleted: 0, skipped: 5` is a 200.
+> There is no undo: confirm in the UI before calling it.
+
 ---
 
 ## 9. Deploy a strategy to brokers

@@ -2,6 +2,7 @@ package com.example.tradeLedger.service;
 
 import com.example.tradeLedger.dto.StrategyDeployRequest;
 import com.example.tradeLedger.dto.StrategyDeploymentResponse;
+import com.example.tradeLedger.dto.UserStrategyBulkDeleteResponse;
 import com.example.tradeLedger.dto.UserStrategyGroupResponse;
 import com.example.tradeLedger.dto.UserStrategyRequest;
 import com.example.tradeLedger.dto.UserStrategyResponse;
@@ -73,6 +74,21 @@ public interface UserStrategyService {
 
     /** Refused while the strategy is still deployed on any broker. */
     void delete(String email, UUID id);
+
+    /**
+     * Delete every strategy the caller owns, under the same filters {@link #list}
+     * takes - all of them, or only the archived ones, or only the ones built from
+     * one template.
+     *
+     * A strategy still deployed on a broker is SKIPPED rather than failing the
+     * whole sweep: a deployment holds a FK to the row, and cascading through it
+     * would silently stop trading on that broker. Each strategy reports its own
+     * outcome, so the caller is told exactly which ones were left behind and why.
+     *
+     * @param active     true/false to filter by the archive flag, null for all
+     * @param strategyId only strategies built from this template, or null for all
+     */
+    UserStrategyBulkDeleteResponse deleteAll(String email, Boolean active, UUID strategyId);
 
     /** The bot read: everything resolved, nothing left to look up. */
     UserStrategyRuntimeResponse runtime(String email, UUID id);
