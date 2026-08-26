@@ -58,9 +58,9 @@ block, which is generated from each indicator's `paramSchema`.
 
 **Or generate all of it.** `GET /api/v1/fixed-parameters/grouped` returns the
 non-indicator fields already arranged into form sections — grouped by
-`paramGroup` (Market, Instrument, Sizing, Exits), each with its label, type and
-bounds — and the template response carries `indicatorGroups[]` for the indicator
-block. Those are descriptors only: a saved strategy carries each **value** as a
+`paramGroup` (Market, Instrument, Sizing, Exits, Deployment), each with its label,
+type and bounds — and the template response carries `indicatorGroups[]` for the
+indicator block. Those are descriptors only: a saved strategy carries each **value** as a
 flat field of the same `name`, so the form fills itself by matching `name` to
 field, and a PUT writes back under that same name. Fetch the descriptors once per
 page, not once per strategy.
@@ -312,8 +312,21 @@ means the column default.
 | `baseLot` | `1` | ≥ 1 |
 | `averagingCount` | `0` | 0–10 |
 | `slPct` / `tpPct` | `null` | 0 < x ≤ 100 |
+| `executionMode` | `FIXED_QTY` | deployment default — `FIXED_QTY` / `CAPITAL_PERCENT` / `RISK_PERCENT` |
+| `multiplier` | `1` | deployment default — ≥ 0 |
+| `capitalAllocated` | `null` | deployment default — ≥ 0 |
+| `tradeMode` | `paper` | deployment default — `paper` / `live` |
 | `indicators[].params` | schema defaults | **merged** over what is stored |
 | `active` | `true` | archive without deleting |
+
+> **The four "deployment default" fields behave differently from the rest.** They
+> are what a deployment of this strategy *starts on* (5.5), copied once at deploy
+> time. Editing them afterwards does **not** move a deployment that already
+> exists — the opposite of every other field on this form, which every broker
+> follows immediately. Say that in the UI, and put them in their own section:
+> they answer "how should this deploy", not "what does this trade". They come off
+> `/api/v1/fixed-parameters` in the `Deployment` group, so a generated form gets
+> the section for free.
 
 An indicator entry is addressed by `indicatorName` — plus `slot` only when a
 template uses one indicator twice. Both come straight off the read (5.3), so a
@@ -338,6 +351,9 @@ any read.
 
   "lotRule": "DOUBLE", "baseLot": 65, "averagingCount": 2,
   "slPct": 1.50, "tpPct": 3.00,
+
+  "executionMode": "FIXED_QTY", "multiplier": 1.00000000,
+  "capitalAllocated": null, "tradeMode": "paper",
 
   "indicators": [ {
       "indicatorName": "EMA Averaging", "slot": null,

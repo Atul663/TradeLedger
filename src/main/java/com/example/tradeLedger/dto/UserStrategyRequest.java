@@ -126,6 +126,27 @@ public class UserStrategyRequest {
             example = "3.0", minimum = "0", exclusiveMinimum = true, maximum = "100")
     private BigDecimal tpPct;
 
+    // ------------------------------------------------- the deployment defaults
+
+    @Schema(description = "What a deployment of this strategy starts on when the deploy call "
+            + "does not name an execution mode.",
+            example = "FIXED_QTY", allowableValues = {"FIXED_QTY", "CAPITAL_PERCENT", "RISK_PERCENT"},
+            defaultValue = "FIXED_QTY")
+    private String executionMode;
+
+    @Schema(description = "Default size multiplier for a deployment of this strategy. 1 runs the "
+            + "ladder as configured.", example = "1", minimum = "0", defaultValue = "1")
+    private BigDecimal multiplier;
+
+    @Schema(description = "Default capital to earmark per account, for the percent-based "
+            + "execution modes.", example = "500000", minimum = "0")
+    private BigDecimal capitalAllocated;
+
+    @Schema(description = "Default trade mode for a deployment of this strategy. Stays paper "
+            + "unless you say otherwise.",
+            example = "paper", allowableValues = {"paper", "live"}, defaultValue = "paper")
+    private String tradeMode;
+
     // --------------------------------------------------------- the indicators
 
     @Schema(description = "Tuning for the indicators the template uses. Omit it entirely and "
@@ -255,6 +276,18 @@ public class UserStrategyRequest {
 
     public BigDecimal getTpPct() { return tpPct; }
     public void setTpPct(BigDecimal tpPct) { this.tpPct = tpPct; }
+
+    public String getExecutionMode() { return executionMode; }
+    public void setExecutionMode(String executionMode) { this.executionMode = executionMode; }
+
+    public BigDecimal getMultiplier() { return multiplier; }
+    public void setMultiplier(BigDecimal multiplier) { this.multiplier = multiplier; }
+
+    public BigDecimal getCapitalAllocated() { return capitalAllocated; }
+    public void setCapitalAllocated(BigDecimal capitalAllocated) { this.capitalAllocated = capitalAllocated; }
+
+    public String getTradeMode() { return tradeMode; }
+    public void setTradeMode(String tradeMode) { this.tradeMode = tradeMode; }
 
     public List<IndicatorTuning> getIndicators() { return indicators; }
     public void setIndicators(List<IndicatorTuning> indicators) { this.indicators = indicators; }

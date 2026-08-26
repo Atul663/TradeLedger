@@ -30,9 +30,11 @@ import java.util.Set;
  * {@code fixed_parameters} costs the descriptors a blank builder form renders
  * from and nothing else, which is the property the catalog was built to have.
  *
- * The 'Deployment' group is deliberately absent: those descriptors name columns
- * on {@code user_strategy_subscriptions}, so they belong to a deployment, not to
- * the strategy it deploys.
+ * The 'Deployment' group is included, and names columns on BOTH tables. On a
+ * strategy those four are the DEFAULT a deployment of it starts on; on
+ * {@code user_strategy_subscriptions} they are what one account actually runs.
+ * The descriptor is the same either way, which is what lets one form render the
+ * strategy's defaults and a deployment's live values from a single catalog.
  */
 @Component
 public class StrategyFixedParameters {
@@ -178,6 +180,15 @@ public class StrategyFixedParameters {
                 "baseLot",
                 "averagingCount",
                 "slPct",
-                "tpPct")));
+                "tpPct",
+                // The Deployment group. These name columns on BOTH tables: on a
+                // strategy they are the default a deployment starts on, on
+                // user_strategy_subscriptions they are what that account actually
+                // runs. Same descriptor, same name, two rows that hold it - which
+                // is exactly what lets one form render either.
+                "executionMode",
+                "multiplier",
+                "capitalAllocated",
+                "tradeMode")));
     }
 }

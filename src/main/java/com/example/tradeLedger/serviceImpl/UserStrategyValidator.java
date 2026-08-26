@@ -4,6 +4,7 @@ import com.example.tradeLedger.dto.StrategyLegView;
 import com.example.tradeLedger.entity.Derivative;
 import com.example.tradeLedger.entity.LotRule;
 import com.example.tradeLedger.entity.Moneyness;
+import com.example.tradeLedger.entity.StrategySubscription;
 import com.example.tradeLedger.entity.UserStrategy;
 import com.example.tradeLedger.exception.StrategyValidationException;
 import org.springframework.stereotype.Component;
@@ -30,6 +31,15 @@ import java.util.Locale;
 @Component
 public class UserStrategyValidator {
 
+    /** The values a DEPLOYMENT stores, which a strategy default has to match exactly. */
+    private static final List<String> EXECUTION_MODES = List.of(
+            StrategySubscription.EXEC_FIXED_QTY,
+            StrategySubscription.EXEC_CAPITAL_PERCENT,
+            StrategySubscription.EXEC_RISK_PERCENT);
+
+    private static final List<String> TRADE_MODES = List.of(
+            StrategySubscription.MODE_PAPER, StrategySubscription.MODE_LIVE);
+
     /**
      * Parses an enum from the wire, case-insensitively, with a message that lists
      * the alternatives instead of leaking a Java exception.
@@ -49,6 +59,37 @@ public class UserStrategyValidator {
     }
 
     /**
+     * The two deployment defaults that are strings rather than enums.
+     *
+     * They are normalized here rather than parsed as enums because the values a
+     * DEPLOYMENT stores are strings - {@code user_strategy_subscriptions} holds
+     * 'paper' and 'FIXED_QTY' verbatim - and a strategy's default has to come out
+     * of this in exactly the form the deployment will hold, casing included.
+     * Null in, null out: an absent field is left alone, like every other one.
+     */
+    public static String executionMode(String value) {
+        return oneOf(value, "executionMode", EXECUTION_MODES, true);
+    }
+
+    public static String tradeMode(String value) {
+        return oneOf(value, "tradeMode", TRADE_MODES, false);
+    }
+
+    private static String oneOf(String value, String field, List<String> allowed, boolean upper) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String normalized = upper
+                ? value.trim().toUpperCase(Locale.ROOT)
+                : value.trim().toLowerCase(Locale.ROOT);
+        if (!allowed.contains(normalized)) {
+            throw new StrategyValidationException(
+                    field + " must be one of " + allowed + ", got '" + value + "'");
+        }
+        return normalized;
+    }
+
+    /**
      * Checks a fully populated strategy, after every field has been applied.
      *
      * Ordering matters: a leg cannot be judged without knowing the derivative, and
@@ -61,6 +102,7 @@ public class UserStrategyValidator {
         validateInstrument(strategy, errors);
         validateSizing(strategy, errors);
         validateExits(strategy, errors);
+        validateDeploymentDefaults(strategy, errors);
 
         if (!errors.isEmpty()) {
             throw new StrategyValidationException(errors);
@@ -131,6 +173,24 @@ public class UserStrategyValidator {
     private void validateExits(UserStrategy strategy, List<String> errors) {
         checkPercent(errors, "slPct", strategy.getSlPct());
         checkPercent(errors, "tpPct", strategy.getTpPct());
+    }
+
+    /**
+     * The numeric deployment defaults. A negative size is the one value here that
+     * would reach the broker as a real order, so it is refused rather than
+     * clamped; the enums are already normalized on the way in.
+     */
+    private void validateDeploymentDefaults(UserStrategy strategy, List<String> errors) {
+        BigDecimal multiplier = strategy.getMultiplier();
+        if (multiplier == null) {
+            errors.add("multiplier is required - 1 runs the ladder as configured");
+        } else if (multiplier.signum() < 0) {
+            errors.add("multiplier must be at least 0, got " + multiplier.toPlainString());
+        }
+        BigDecimal capital = strategy.getCapitalAllocated();
+        if (capital != null && capital.signum() < 0) {
+            errors.add("capitalAllocated must be at least 0, got " + capital.toPlainString());
+        }
     }
 
     private void checkPercent(List<String> errors, String field, BigDecimal value) {

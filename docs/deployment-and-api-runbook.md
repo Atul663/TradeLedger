@@ -74,6 +74,28 @@ WHERE schemaname = 'public'
 -- expect 0 rows
 ```
 
+### ⚠️ If you already have strategies: run the deployment-defaults migration
+
+`user_strategies` gained four columns — `execution_mode`, `multiplier`,
+`capital_allocated`, `trade_mode` — the defaults a deployment of a strategy starts
+on. Three are `NOT NULL`, and `ddl-auto=update` adds a `NOT NULL` column with no
+default, which **PostgreSQL refuses on a table that already has rows**. The app
+would fail to start.
+
+Run this ONCE before booting the new build:
+
+```bash
+psql "$DB_URL" -f src/main/resources/db/user-strategies-deployment-defaults-migration.sql
+```
+
+It adds the columns with their defaults (and the same CHECK constraints the
+subscription table carries), so `ddl-auto` then has nothing to do. Every existing
+strategy comes out deploying exactly as before: `FIXED_QTY`, 1×, no earmarked
+capital, **paper**. Nothing goes live because a column appeared.
+
+Skip it only if you dropped the tables above, or the database is new — and it is a
+guarded no-op in both cases anyway.
+
 ### Environment variables
 
 | Variable | Required | Effect if missing |
@@ -825,8 +847,19 @@ Authorization: Bearer {{TOKEN}}
 | `baseLot` | int | `1` | ≥ 1 |
 | `averagingCount` | int | `0` | `0..10`; non-FIXED `lotRule` needs ≥ 1 |
 | `slPct` / `tpPct` | decimal(6,2) | `null` | `0 < x ≤ 100` |
+| `executionMode` | enum | `FIXED_QTY` | `FIXED_QTY` \| `CAPITAL_PERCENT` \| `RISK_PERCENT`; **deployment default** |
+| `multiplier` | decimal(20,8) | `1` | ≥ 0; **deployment default** |
+| `capitalAllocated` | decimal(20,8) | `null` | ≥ 0; **deployment default** |
+| `tradeMode` | enum | `paper` | `paper` \| `live`; **deployment default** |
 | `indicators[]` | array | schema defaults | see below |
 | `active` | bool | `true` | archive without deleting |
+
+The last four are the **Deployment** fixed-parameter group, and they behave
+differently from everything above them. They are what a deployment of this
+strategy *starts on* when `POST /{id}/deploy` does not name a value — copied once,
+at deploy time. **Editing them later does not reach a deployment that already
+exists**, which is the opposite of every other field here. Leave them alone and
+the strategy deploys `paper` at 1×.
 
 `indicators[]` entry: `{ "indicatorName", "slot"?, "params"?, "enabled"? }` — the
 same shape a read returns, so send back the entry you read with the params you
@@ -864,6 +897,11 @@ Enums parse case-insensitively (`"otm"` works), but send the canonical form.
   "averagingCount": 2,
   "slPct": 1.50,
   "tpPct": 3.00,
+
+  "executionMode": "FIXED_QTY",
+  "multiplier": 1.00000000,
+  "capitalAllocated": null,
+  "tradeMode": "paper",
 
   "indicators": [
     { "indicatorName": "EMA Averaging",
@@ -1110,13 +1148,29 @@ Authorization: Bearer {{TOKEN}}
 
 - a target names **one account** (`tradingAccountId`) **or a whole setup**
   (`userBrokerId`, which fans out to every account under it);
-- request-level fields are defaults; a target that sets one wins;
 - per-target overridable: `riskProfileId`, `multiplier`, `capitalAllocated`,
   `executionMode`, `tradeMode`;
 - `executionMode` ∈ `FIXED_QTY` · `CAPITAL_PERCENT` · `RISK_PERCENT`;
   `tradeMode` ∈ `paper` · `live`;
 - **no configuration in this body** — it comes from the strategy, which is what
   makes every broker feed off one shared computation.
+
+**Narrowest wins, and the strategy is the floor.** Each of the four sizing fields
+resolves *target → request → the strategy's own column*:
+
+```http
+POST {{BASE}}/api/v1/my-strategies/{{id}}/deploy
+{ "targets": [ { "userBrokerId": "ub000000-…" } ] }
+```
+
+is a complete call. It deploys every account under that setup on the
+`executionMode`, `multiplier`, `capitalAllocated` and `tradeMode` the strategy was
+created with — no need to restate them here. Naming one at request level overrides
+the strategy for this call; naming it on a target overrides both for that account.
+
+The copy happens **once**. Change `tradeMode` on the strategy afterwards and the
+deployments made earlier keep running as they were — `PUT /api/v1/my-subscriptions/{id}`
+is what moves an existing one.
 
 ### Response — always **200** when the request itself was well-formed
 

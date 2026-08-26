@@ -34,11 +34,11 @@ import static org.mockito.Mockito.when;
  * The fixed knobs a strategy can carry, arranged as the sections a form draws.
  *
  * Two things are worth pinning, because neither is recomputable from either side
- * alone. The first is WHICH descriptors take part: the deployment ones describe
- * subscription columns, so a strategy form offering them would be promising
- * settings the row has nowhere to keep. The second is the OPTIONS - the symbol
- * and exchange knobs have no fixed choice list, they read one from the tables, and
- * a form that got an empty select could not pick a market at all.
+ * alone. The first is WHICH descriptors take part: one a strategy has no column
+ * for would render an input that reads nothing and writes nowhere, so it is
+ * filtered out. The second is the OPTIONS - the symbol and exchange knobs have no
+ * fixed choice list, they read one from the tables, and a form that got an empty
+ * select could not pick a market at all.
  *
  * Values are not part of this shape. They are flat fields on the strategy
  * response, which a form binds to by descriptor name - the last test here is what
@@ -88,7 +88,12 @@ class StrategyFixedParametersTest {
 
     /** The catalog as the seeder leaves it, in the order the repository returns it. */
     private void seedCatalog() {
+        // Ordered the way the repository returns it - by paramGroup, then
+        // displayOrder - so 'Deployment' leads on the D.
         when(catalog.findByActiveOrderByParamGroupAscDisplayOrderAscNameAsc(true)).thenReturn(List.of(
+                // Names a column on BOTH tables: the strategy's default, and the
+                // live value on user_strategy_subscriptions.
+                descriptor("Deployment", 4, "tradeMode", "enum", null),
                 descriptor("Exits", 1, "slPct", "decimal", """
                         {"min":0,"max":100}"""),
                 descriptor("Exits", 2, "tpPct", "decimal", null),
@@ -101,9 +106,7 @@ class StrategyFixedParametersTest {
                 descriptor("Market", 2, "candleDuration", "timeframe", null),
                 descriptor("Market", 3, "triggerDuration", "timeframe", null),
                 descriptor("Sizing", 1, "lotRule", "enum", null),
-                descriptor("Sizing", 2, "baseLot", "int", null),
-                // Describes a user_strategy_subscriptions column, not a strategy one.
-                descriptor("Deployment", 4, "tradeMode", "enum", null)));
+                descriptor("Sizing", 2, "baseLot", "int", null)));
     }
 
     private static FixedParameter descriptor(String group, int order, String name,
@@ -134,30 +137,42 @@ class StrategyFixedParametersTest {
 
         List<FixedParameterGroupResponse> groups = fixedParameters.descriptors();
 
-        assertEquals(List.of("Exits", "Instrument", "Market", "Sizing"),
+        assertEquals(List.of("Deployment", "Exits", "Instrument", "Market", "Sizing"),
                 groups.stream().map(FixedParameterGroupResponse::paramGroup).toList(),
                 "the sections come back in the order the catalog is read in");
         assertEquals(List.of("slPct", "tpPct"),
-                groups.get(0).parameters().stream().map(FixedParameterResponse::name).toList(),
+                groups.get(1).parameters().stream().map(FixedParameterResponse::name).toList(),
                 "and the rows inside keep their displayOrder");
         groups.forEach(group -> assertEquals(group.count(), group.parameters().size(),
                 "the count and the rows must agree"));
     }
 
     /**
-     * The deployment knobs describe subscription columns. A strategy has no such
-     * column behind them, so offering one would be inventing a setting.
+     * The deployment knobs ARE a strategy section: a strategy carries the default
+     * each deployment of it starts on, in a column of the same name.
      */
     @Test
-    void theDeploymentGroupIsNotAStrategySection() {
+    void theDeploymentGroupIsAStrategySection() {
         seedCatalog();
 
         List<FixedParameterGroupResponse> groups = fixedParameters.descriptors();
 
-        assertTrue(groups.stream().noneMatch(group -> "Deployment".equals(group.paramGroup())),
-                "a strategy does not carry the deployment knobs");
+        assertTrue(groups.stream().anyMatch(group -> "Deployment".equals(group.paramGroup())),
+                "a strategy carries a default for each deployment knob");
         assertTrue(byName(groups).keySet().stream().allMatch(StrategyFixedParameters.knobNames()::contains),
                 "only knobs this class recognizes appear");
+    }
+
+    /** A descriptor naming no column at all is still filtered out. */
+    @Test
+    void aKnobWithNoColumnBehindItIsNotOffered() {
+        when(catalog.findByActiveOrderByParamGroupAscDisplayOrderAscNameAsc(true)).thenReturn(List.of(
+                descriptor("Exits", 1, "slPct", "decimal", null),
+                // Invented through POST /api/v1/fixed-parameters; no column holds it.
+                descriptor("Exits", 2, "trailingSlPct", "decimal", null)));
+
+        assertEquals(List.of("slPct"), byName(fixedParameters.descriptors()).keySet().stream().toList(),
+                "a knob an admin invents stays out of a shape with nothing to fill it from");
     }
 
     // ------------------------------------------------------- the symbol knob

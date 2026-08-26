@@ -405,6 +405,25 @@ public class UserStrategyServiceImpl implements UserStrategyService {
         if (request.getTpPct() != null) {
             strategy.setTpPct(request.getTpPct());
         }
+
+        // The deployment defaults. Applied like any other field - and like any
+        // other field they are the AUTHOR's setting, not a live one: a deployment
+        // that already exists carries its own copy and is not touched here.
+        String executionMode = UserStrategyValidator.executionMode(request.getExecutionMode());
+        if (executionMode != null) {
+            strategy.setExecutionMode(executionMode);
+        }
+        if (request.getMultiplier() != null) {
+            strategy.setMultiplier(request.getMultiplier());
+        }
+        if (request.getCapitalAllocated() != null) {
+            strategy.setCapitalAllocated(request.getCapitalAllocated());
+        }
+        String tradeMode = UserStrategyValidator.tradeMode(request.getTradeMode());
+        if (tradeMode != null) {
+            strategy.setTradeMode(tradeMode);
+        }
+
         if (request.getActive() != null) {
             strategy.setActive(request.getActive());
         }
@@ -670,7 +689,7 @@ public class UserStrategyServiceImpl implements UserStrategyService {
                     + " has no market yet - set symbol and candleDuration before deploying");
         }
 
-        List<Destination> destinations = expand(user, request);
+        List<Destination> destinations = expand(user, request, strategy);
         List<StrategyDeploymentResponse.Item> results = new ArrayList<>(destinations.size());
         int deployed = 0;
 
@@ -719,7 +738,7 @@ public class UserStrategyServiceImpl implements UserStrategyService {
      * Turns targets into accounts, resolving a broker setup into every account
      * under it and rejecting an account named twice before anything is written.
      */
-    private List<Destination> expand(User user, StrategyDeployRequest request) {
+    private List<Destination> expand(User user, StrategyDeployRequest request, UserStrategy strategy) {
         List<Destination> destinations = new ArrayList<>();
         Map<UUID, String> seen = new LinkedHashMap<>();
 
@@ -733,13 +752,20 @@ public class UserStrategyServiceImpl implements UserStrategyService {
                     throw new StrategyValidationException("Account " + previous
                             + " is named twice in targets - a strategy is deployed on an account once");
                 }
+                // Narrowest wins: this account, then the call, then what the
+                // strategy was authored to deploy as. The strategy's own columns
+                // are never null for the three that are NOT NULL, so this chain
+                // always resolves and the subscription layer's own defaults are
+                // only reached for riskProfileId.
                 destinations.add(new Destination(
                         account,
                         first(target.getRiskProfileId(), request.getRiskProfileId()),
-                        first(target.getMultiplier(), request.getMultiplier()),
-                        first(target.getCapitalAllocated(), request.getCapitalAllocated()),
-                        first(target.getExecutionMode(), request.getExecutionMode()),
-                        first(target.getTradeMode(), request.getTradeMode())));
+                        first(target.getMultiplier(), request.getMultiplier(), strategy.getMultiplier()),
+                        first(target.getCapitalAllocated(), request.getCapitalAllocated(),
+                                strategy.getCapitalAllocated()),
+                        first(target.getExecutionMode(), request.getExecutionMode(),
+                                strategy.getExecutionMode()),
+                        first(target.getTradeMode(), request.getTradeMode(), strategy.getTradeMode())));
             }
         }
         if (destinations.isEmpty()) {
@@ -799,6 +825,11 @@ public class UserStrategyServiceImpl implements UserStrategyService {
 
     private static <T> T first(T preferred, T fallback) {
         return preferred != null ? preferred : fallback;
+    }
+
+    /** The three-level chain: this account, then the call, then the strategy's own default. */
+    private static <T> T first(T preferred, T fallback, T last) {
+        return preferred != null ? preferred : first(fallback, last);
     }
 
     // ------------------------------------------------------------ resolving
@@ -894,6 +925,10 @@ public class UserStrategyServiceImpl implements UserStrategyService {
                 strategy.getAveragingCount(),
                 strategy.getSlPct(),
                 strategy.getTpPct(),
+                strategy.getExecutionMode(),
+                strategy.getMultiplier(),
+                strategy.getCapitalAllocated(),
+                strategy.getTradeMode(),
                 indicators,
                 strategy.isDeployable(),
                 strategy.isActive(),

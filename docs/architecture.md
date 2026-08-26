@@ -530,7 +530,8 @@ Every other endpoint expects `Authorization: Bearer <accessToken>`.
                {"userBrokerId":"…"} ] }          ← fans out to all its accounts
 
  expand()   target → account(s), ownership-checked
-            per-target value wins, else the request-level default
+            narrowest wins: this target, else the request, else the
+            STRATEGY's own default column
             the same account twice → 400 before anything is written
         │
         ▼
@@ -552,6 +553,16 @@ exception in a loop would only move the failure to commit time and take the
 successes down with it. Each account gets a clean transaction; when it fails, only
 that one rolls back. It lives in its own bean because Spring's transaction advice
 is a proxy — a self-call would silently bypass the annotation.
+
+**Where the sizing comes from.** `executionMode`, `multiplier`, `capitalAllocated`
+and `tradeMode` resolve narrowest-first: the target, then the request, then the
+strategy's own column. So `{"targets":[{"userBrokerId":"…"}]}` deploys the way the
+strategy was authored without repeating itself, and a call that names a value
+still wins. **The flow is one-way and once.** The deployment copies these four at
+creation; editing them on the strategy afterwards does not reach it — the opposite
+of the configuration fields, which every deployment follows because it points at
+the row rather than copying it. A strategy that never set them deploys `paper`
+at 1×, so an unset field can never be why an order reaches a broker live.
 
 ### 6.4 Retune — `PUT /api/v1/my-strategies/{id}`
 
@@ -682,7 +693,7 @@ An `ApplicationRunner`, idempotent on `indicators.name`,
 | `Instrument` | `derivative`, `ceEnabled` / `ceMoneyness` / `ceStrikeOffset`, and the `pe` three |
 | `Sizing` | `lotRule`, `baseLot`, `averagingCount` |
 | `Exits` | `slPct`, `tpPct` |
-| `Deployment` | `executionMode`, `multiplier`, `capitalAllocated`, `tradeMode` |
+| `Deployment` | `executionMode`, `multiplier`, `capitalAllocated`, `tradeMode` — the only four that name a column on **both** tables: on `user_strategies` the default a deployment starts on, on `user_strategy_subscriptions` what that account runs |
 
 Schemas **converge** on every boot — they are the only declaration of what applies
 by default, so a platform retune has to be able to land. Rule trees converge only

@@ -178,6 +178,46 @@ public class UserStrategy {
     @Column(name = "tp_pct", precision = 6, scale = 2)
     private BigDecimal tpPct;
 
+    // ------------------------------------------------- the deployment defaults
+
+    /*
+     * What a deployment of this strategy starts on when the deploy call does not
+     * say otherwise.
+     *
+     * These are DEFAULTS, not settings: the live value of each one is the column
+     * of the same name on user_strategy_subscriptions, decided per account, and
+     * changing one here never reaches a deployment that already exists. That is
+     * the same rule as everywhere else on this row read backwards - the config
+     * fields above move every broker at once precisely because a deployment does
+     * not copy them, while these four are copied at deploy time and then belong
+     * to the account.
+     *
+     * The point is a strategy authored as "mine runs live at 2x" deploying
+     * without repeating itself on every call.
+     */
+
+    /** FIXED_QTY | CAPITAL_PERCENT | RISK_PERCENT. */
+    @Column(name = "execution_mode", nullable = false, length = 20)
+    private String executionMode = StrategySubscription.EXEC_FIXED_QTY;
+
+    /** Scales baseLot on the account. 1 runs the ladder as configured. */
+    @Column(name = "multiplier", precision = 20, scale = 8, nullable = false)
+    private BigDecimal multiplier = BigDecimal.ONE;
+
+    /** Capital to earmark per account, for the percent-based execution modes. */
+    @Column(name = "capital_allocated", precision = 20, scale = 8)
+    private BigDecimal capitalAllocated;
+
+    /**
+     * paper | live.
+     *
+     * Defaults to paper, and stays paper unless the author says otherwise - a
+     * strategy that silently deployed live because a field was left unset is the
+     * one mistake here that costs money.
+     */
+    @Column(name = "trade_mode", nullable = false, length = 10)
+    private String tradeMode = StrategySubscription.MODE_PAPER;
+
     // ---------------------------------------------------------- the wiring
 
     /**
@@ -297,6 +337,18 @@ public class UserStrategy {
 
     public BigDecimal getTpPct() { return tpPct; }
     public void setTpPct(BigDecimal tpPct) { this.tpPct = tpPct; }
+
+    public String getExecutionMode() { return executionMode; }
+    public void setExecutionMode(String executionMode) { this.executionMode = executionMode; }
+
+    public BigDecimal getMultiplier() { return multiplier; }
+    public void setMultiplier(BigDecimal multiplier) { this.multiplier = multiplier; }
+
+    public BigDecimal getCapitalAllocated() { return capitalAllocated; }
+    public void setCapitalAllocated(BigDecimal capitalAllocated) { this.capitalAllocated = capitalAllocated; }
+
+    public String getTradeMode() { return tradeMode; }
+    public void setTradeMode(String tradeMode) { this.tradeMode = tradeMode; }
 
     public SharedStrategyConfig getSharedConfig() { return sharedConfig; }
     public void setSharedConfig(SharedStrategyConfig sharedConfig) { this.sharedConfig = sharedConfig; }

@@ -182,6 +182,30 @@ public class UserStrategyController extends SecuredController {
                                                 { "indicatorName": "EMA Averaging", "params": { "k": 50, "d": 21 } }
                                               ]
                                             }"""),
+                            @ExampleObject(name = "With deployment defaults",
+                                    description = "The last four are what a DEPLOYMENT of this "
+                                            + "strategy starts on when POST /{id}/deploy does not "
+                                            + "name a value - so \"deploy it on my Dhan\" needs no "
+                                            + "sizing in the body. They are copied once, at deploy "
+                                            + "time: editing them later does not move a deployment "
+                                            + "that already exists. Omit them and it deploys paper "
+                                            + "at 1x.",
+                                    value = """
+                                            {
+                                              "strategyName": "EMA Averaging",
+                                              "name": "NIFTY live 2x",
+                                              "symbol": "NIFTY",
+                                              "exchangeCode": "NSE",
+                                              "candleDuration": "5m",
+                                              "derivative": "OPTION",
+                                              "ceEnabled": true, "ceMoneyness": "OTM", "ceStrikeOffset": 1,
+                                              "lotRule": "FIXED",
+                                              "baseLot": 75,
+                                              "executionMode": "CAPITAL_PERCENT",
+                                              "multiplier": 2,
+                                              "capitalAllocated": 500000,
+                                              "tradeMode": "live"
+                                            }"""),
                             @ExampleObject(name = "Minimal - template only",
                                     description = "Valid, and saves on platform defaults. Not "
                                             + "deployable until a symbol and candle are set.",
@@ -283,7 +307,13 @@ public class UserStrategyController extends SecuredController {
 
                     **The status is 200 whenever the request itself was well-formed, even if \
                     every target failed** - read `deployed` / `failed` for the summary and \
-                    `results[]` for the per-broker detail. Render results, not the status code.""")
+                    `results[]` for the per-broker detail. Render results, not the status code.
+
+                    `executionMode`, `multiplier`, `capitalAllocated` and `tradeMode` resolve \
+                    NARROWEST FIRST: the target, then this request, then the strategy's own \
+                    default. A body of nothing but `targets` is complete - it deploys the way \
+                    the strategy was authored. The values are copied once, here; editing them \
+                    on the strategy afterwards does not move a deployment that already exists.""")
     @io.swagger.v3.oas.annotations.parameters.RequestBody(
             required = true,
             content = @Content(schema = @Schema(implementation = StrategyDeployRequest.class),

@@ -110,6 +110,24 @@ public record UserStrategyResponse(
         @Schema(example = "3.00")
         BigDecimal tpPct,
 
+        // ------------------------------------------------- deployment defaults
+
+        @Schema(description = "What a deployment of this strategy STARTS on when the deploy call "
+                + "does not say otherwise. Changing one of these four never reaches a deployment "
+                + "that already exists - unlike the configuration above, a deployment copies "
+                + "them once and then owns its own.",
+                example = "FIXED_QTY", allowableValues = {"FIXED_QTY", "CAPITAL_PERCENT", "RISK_PERCENT"})
+        String executionMode,
+
+        @Schema(example = "1.00000000")
+        BigDecimal multiplier,
+
+        @Schema(description = "Null when nothing is earmarked.", example = "500000.00000000")
+        BigDecimal capitalAllocated,
+
+        @Schema(example = "paper", allowableValues = {"paper", "live"})
+        String tradeMode,
+
         // --------------------------------------------------------- indicators
 
         @Schema(description = "Every indicator usage, flat and in display order.")
