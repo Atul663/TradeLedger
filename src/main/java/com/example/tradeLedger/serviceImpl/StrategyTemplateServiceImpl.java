@@ -23,7 +23,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -48,7 +50,6 @@ public class StrategyTemplateServiceImpl implements StrategyTemplateService {
     private final UserStrategyRepository userStrategyRepository;
     private final IndicatorRepository indicatorRepository;
     private final StrategyTemplateValidator validator;
-    private final StrategyFixedParameters fixedParameters;
     private final JsonSupport json;
 
     public StrategyTemplateServiceImpl(StrategyTemplateRepository strategyRepository,
@@ -56,14 +57,12 @@ public class StrategyTemplateServiceImpl implements StrategyTemplateService {
                                        UserStrategyRepository userStrategyRepository,
                                        IndicatorRepository indicatorRepository,
                                        StrategyTemplateValidator validator,
-                                       StrategyFixedParameters fixedParameters,
                                        JsonSupport json) {
         this.strategyRepository = strategyRepository;
         this.sharedConfigRepository = sharedConfigRepository;
         this.userStrategyRepository = userStrategyRepository;
         this.indicatorRepository = indicatorRepository;
         this.validator = validator;
-        this.fixedParameters = fixedParameters;
         this.json = json;
     }
 
@@ -84,7 +83,51 @@ public class StrategyTemplateServiceImpl implements StrategyTemplateService {
             templates = strategyRepository
                     .findByActiveAndNameContainingIgnoreCaseOrderByNameAsc(active, search.trim());
         }
-        return templates.stream().map(this::toResponse).toList();
+        Page page = page(templates);
+        return templates.stream().map(template -> toResponse(template, page)).toList();
+    }
+
+    /**
+     * Everything a response needs that is not on the template row, read ONCE for
+     * the whole page rather than once per template.
+     *
+     * Three queries whatever the page size. Asked per template they were three
+     * round trips per row, and the indicator lookup was one more per indicator the
+     * tree names - on a remote database that was the whole latency of the endpoint.
+     */
+    private Page page(List<StrategyTemplate> templates) {
+        List<UUID> ids = templates.stream().map(StrategyTemplate::getId).toList();
+        if (ids.isEmpty()) {
+            return new Page(Map.of(), Map.of(), Map.of());
+        }
+        // The catalogue is small and every template reads most of it, so one full
+        // read beats a lookup per name - and it is keyed the way the tree spells
+        // names, folded, since a tree matches an indicator without regard to case.
+        Map<String, Indicator> byName = new HashMap<>();
+        for (Indicator indicator : indicatorRepository.findAll()) {
+            byName.put(indicator.getName().toLowerCase(Locale.ROOT), indicator);
+        }
+        return new Page(byName,
+                counts(sharedConfigRepository.countByStrategyIds(ids)),
+                counts(userStrategyRepository.countByStrategyIds(ids)));
+    }
+
+    /** A template absent from a GROUP BY has none of that thing, not an unknown number. */
+    private static Map<UUID, Long> counts(List<Object[]> pairs) {
+        Map<UUID, Long> counts = new HashMap<>();
+        for (Object[] pair : pairs) {
+            counts.put((UUID) pair[0], ((Number) pair[1]).longValue());
+        }
+        return counts;
+    }
+
+    private record Page(Map<String, Indicator> indicatorsByName,
+                        Map<UUID, Long> instanceCounts,
+                        Map<UUID, Long> strategyCounts) {
+
+        Indicator indicator(String name) {
+            return indicatorsByName.get(name.toLowerCase(Locale.ROOT));
+        }
     }
 
     @Override
@@ -251,13 +294,21 @@ public class StrategyTemplateServiceImpl implements StrategyTemplateService {
 
     // -------------------------------------------------------------- mapping
 
+    /** One template on its own - a page of one, so the mapping below has a single shape. */
+    private StrategyTemplateDetailResponse toResponse(StrategyTemplate template) {
+        return toResponse(template, page(List.of(template)));
+    }
+
     /**
      * The indicator list is read from the rule tree itself, which is the only
      * declaration there is. A name that resolves to no active indicator has no id
      * and lands in {@code unknownIndicators} - which is how a broken tree surfaces
      * before anyone builds a strategy on it.
+     *
+     * The tree is READ here and not returned: what a form needs from it is the
+     * resolved indicators, and the tree itself is platform logic.
      */
-    private StrategyTemplateDetailResponse toResponse(StrategyTemplate template) {
+    private StrategyTemplateDetailResponse toResponse(StrategyTemplate template, Page page) {
         List<IndicatorSummaryResponse> indicators = new ArrayList<>();
         List<StrategyTemplateIndicatorGroupResponse> groups = new ArrayList<>();
         List<String> unknown = new ArrayList<>();
@@ -269,7 +320,7 @@ public class StrategyTemplateServiceImpl implements StrategyTemplateService {
             // builder form needs - it is how many tuning rows it has to draw.
             for (Map.Entry<String, Integer> named : IndicatorResolver.indicatorNameCounts(tree).entrySet()) {
                 String name = named.getKey();
-                Indicator indicator = indicatorRepository.findByNameIgnoreCase(name).orElse(null);
+                Indicator indicator = page.indicator(name);
                 if (indicator == null || !indicator.isActive()) {
                     unknown.add(name);
                     continue;
@@ -292,13 +343,11 @@ public class StrategyTemplateServiceImpl implements StrategyTemplateService {
                 template.getDescription(),
                 template.isSystem(),
                 template.isActive(),
-                json.toMap(template.getRuleTree()),
                 indicators,
                 groups,
-                fixedParameters.descriptors(),
                 unknown,
-                sharedConfigRepository.countByStrategy_Id(template.getId()),
-                userStrategyRepository.countByStrategy_Id(template.getId()),
+                page.instanceCounts().getOrDefault(template.getId(), 0L),
+                page.strategyCounts().getOrDefault(template.getId(), 0L),
                 template.getCreatedAt(),
                 template.getUpdatedAt());
     }

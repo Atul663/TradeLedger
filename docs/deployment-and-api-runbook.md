@@ -158,6 +158,21 @@ sends the old spelling keeps working, but anything comparing a *response* agains
 `'paper'` needs updating. See `docs/strategy-builder-ui-api.md`, where
 `type TradeMode` now reads `'Paper' | 'Live'`.
 
+### Optional: the indicator name index
+
+A rule tree names an indicator by string and the platform matches it without
+regard to case, so every resolution runs `upper(name) = upper(?)` — which the
+UNIQUE index on `indicators.name` cannot serve. `ddl-auto=update` creates neither
+functional nor partial indexes, so it has to be run by hand:
+
+```bash
+psql "$DB_URL" -f src/main/resources/db/indicators-name-index-migration.sql
+```
+
+Optional because the catalogue is small enough that a sequential scan is cheap —
+run it whenever, before or after booting, and twice if you like. It is in
+`control-plane-schema.sql` for databases created from scratch.
+
 ### Environment variables
 
 | Variable | Required | Effect if missing |
@@ -798,15 +813,15 @@ GET {{BASE}}/api/v1/strategy-templates?active=true
     "description": "EMA of the highs against a shorter signal leg, traded through options or the future, with a configurable averaging ladder.",
     "system": true,
     "active": true,
-    "ruleTree": { "entry": { "ind": "EMA Averaging",
-                             "params": { "k": "$k", "d": "$d" } } },
     "indicators": [
       { "id": "i1000000-0000-0000-0000-000000000001",
         "name": "EMA Averaging",
         "active": true,
         "paramSchema": {
-          "k": { "type": "int", "min": 1, "max": 300, "default": 21 },
-          "d": { "type": "int", "min": 1, "max": 300, "default": 9, "lt": "k" } } } ],
+          "k": { "type": "int", "min": 1, "max": 300, "default": 21, "label": "Short (k)" },
+          "d": { "type": "int", "min": 1, "max": 300, "default": 9, "lt": "k", "label": "Long (d)" } } } ],
+    "indicatorGroups": [
+      { "indicatorName": "EMA Averaging", "usageCount": 1, "count": 1, "indicators": [ … ] } ],
     "unknownIndicators": [],
     "instanceCount": 0,
     "strategyCount": 0,

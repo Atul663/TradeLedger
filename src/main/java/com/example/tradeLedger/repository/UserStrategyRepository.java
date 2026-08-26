@@ -3,7 +3,10 @@ package com.example.tradeLedger.repository;
 import com.example.tradeLedger.entity.UserStrategy;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -42,6 +45,22 @@ public interface UserStrategyRepository extends JpaRepository<UserStrategy, UUID
 
     /** Guards template deletion: a template customized by users is still in use. */
     long countByStrategy_Id(UUID strategyId);
+
+    /**
+     * The same count for MANY templates at once - one query per list response
+     * rather than one per template.
+     *
+     * {@code [strategyId, count]} pairs; a template nobody has built on is absent
+     * rather than zero, so callers default a miss to 0. Mirrors
+     * {@code SharedStrategyConfigRepository.countByStrategyIds}, which the same
+     * response asks alongside it.
+     */
+    @Query("""
+            select s.strategy.id, count(s)
+              from UserStrategy s
+             where s.strategy.id in :strategyIds
+             group by s.strategy.id""")
+    List<Object[]> countByStrategyIds(@Param("strategyIds") Collection<UUID> strategyIds);
 
     /** Guards symbol deletion: an underlying somebody's strategy watches is still in use. */
     long countBySymbol_Id(UUID symbolId);

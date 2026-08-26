@@ -721,7 +721,7 @@ All strategy-module endpoints require `Authorization: Bearer <accessToken>`.
 | GET | `/api/v1/fixed-parameters/grouped?group=&scope=&active=` | The same rows, one group per `paramGroup` — the sections a form renders |
 | GET | `/api/v1/fixed-parameters/{id}`, `/by-name/{name}` | Name matched case-insensitively |
 | POST/PUT/DELETE | `/api/v1/fixed-parameters`, `/{id}` | **Descriptors, not values** — nothing here changes what a strategy runs with. `defaultValue` is parsed against `dataType` and `validation` on write |
-| GET | `/api/v1/strategy-templates?active=&search=` | The template + its indicators' schemas, also grouped by indicator name (`indicatorGroups[]`) and the fixed-knob descriptors grouped by section (`fixedParameters[]`) |
+| GET | `/api/v1/strategy-templates?active=&search=` | The template + its indicators' schemas, also grouped by indicator name (`indicatorGroups[]`). Neither the rule tree nor the fixed-knob descriptors are returned - fetch those once from `/api/v1/fixed-parameters` |
 | GET | `/api/v1/strategy-templates/{id}`, `/by-name/{name}` | |
 | POST | `/api/v1/strategy-templates` | 201, `is_system` forced false |
 | PUT / DELETE | `/api/v1/strategy-templates/{id}` | 409 on system rows; rule tree frozen once strategies exist |

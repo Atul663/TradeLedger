@@ -209,10 +209,8 @@ computation. Nothing broke — do not show a scary message. The PUT response doe
 not report it; watch `configHash` on `/my-strategies/{id}/runtime` if you want to
 show it.
 
----
 
 ## 5. Endpoint reference
-
 ### 5.1 `GET /api/v1/strategy-templates`
 
 ```json
@@ -220,25 +218,16 @@ show it.
   "id": "9f1c…", "name": "EMA Averaging", "version": 1,
   "description": "EMA of the highs against a shorter signal leg…",
   "system": true, "active": true,
-  "ruleTree": { "entry": { "ind": "EMA Averaging", "params": {"k":"$k","d":"$d"} } },
   "indicators": [ {
       "id": "b2e4…", "name": "EMA Averaging", "active": true,
       "paramSchema": {
-        "k": {"type":"int","min":1,"max":300,"default":21},
-        "d": {"type":"int","min":1,"max":300,"default":9,"lt":"k"}
+        "k": {"type":"int","min":1,"max":300,"default":21,"label":"Short (k)"},
+        "d": {"type":"int","min":1,"max":300,"default":9,"lt":"k","label":"Long (d)"}
       } } ],
   "indicatorGroups": [ {
       "indicatorName": "EMA Averaging", "usageCount": 1, "count": 1,
       "indicators": [ { "id": "b2e4…", "name": "EMA Averaging", "active": true,
                         "paramSchema": { "k": {…}, "d": {…} } } ] } ],
-  "fixedParameters": [ {
-      "paramGroup": "Exits", "count": 2,
-      "parameters": [ {
-          "id": "…", "name": "slPct", "label": "SL %",
-          "description": "Percent move against the position that closes it…",
-          "dataType": "decimal", "scope": "execution",
-          "defaultValue": "2.5", "validation": {"min":0,"max":100},
-          "displayOrder": 1, "required": false, "active": true } ] } ],
   "unknownIndicators": [],
   "instanceCount": 4, "strategyCount": 12,
   "createdAt": "2026-08-23T15:58:49.123+05:30", "updatedAt": "…"
@@ -250,12 +239,18 @@ show it.
 how many tuning rows a strategy built from this template will carry**, so a
 template naming EMA twice gives `usageCount: 2` and the strategy gets two.
 
-`fixedParameters[]` is the platform's fixed knobs, grouped by `paramGroup` and
-ordered the way a form lays them out. Descriptors only — a template holds no
-values, and neither does this shape. They are the same sections
-`GET /api/v1/fixed-parameters/grouped` returns, so one form draws a blank template
-and a saved strategy alike: reopened on a strategy, each field takes its value
-from the flat field of the same `name` (see 5.3).
+> **Changed:** `ruleTree` and `fixedParameters[]` are no longer returned here.
+>
+> The tree is platform logic and a form never read it — what a form needs from it
+> is already resolved into `indicators[]` and `indicatorGroups[]`. The fixed knobs
+> describe columns on `user_strategies`, so they were **identical in every entry
+> of the list**, and building them re-read the whole `symbols` table once per
+> template to fill the instrument select. That was the eleven seconds and most of
+> the payload.
+>
+> Fetch the knobs **once** from `GET /api/v1/fixed-parameters/grouped` and reuse
+> them across every template. If you need a template's raw tree, it is still on
+> the write side (`POST`/`PUT` take `ruleTree`).
 
 #### Rendering an indicator input from `paramSchema`
 
@@ -263,6 +258,7 @@ from the flat field of the same `name` (see 5.3).
 |---|---|---|
 | `type` | `int` \| `decimal` \| `bool` \| `enum` \| `text` | which control |
 | `default` | **always present** | the initial value |
+| `label` | **always present on read** — falls back to the key | the field caption |
 | `min` / `max` | numeric bounds | input bounds, client-side check |
 | `options` | non-empty list (required for `enum`) | a select |
 | `gt` / `lt` | names another key of the same indicator | a cross-field check: `d` must stay under `k` |

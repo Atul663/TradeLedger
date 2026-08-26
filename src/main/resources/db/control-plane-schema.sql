@@ -381,6 +381,15 @@ CREATE TABLE IF NOT EXISTS indicators (
   created_at   timestamptz NOT NULL DEFAULT now()
 );
 
+-- A rule tree names an indicator by string and is matched WITHOUT regard to
+-- case, so every lookup is upper(name) = upper(?) - which the UNIQUE index on
+-- name cannot serve. This is the one that can.
+--
+-- Not itself UNIQUE: name already is, and a database predating the casing fix
+-- may still hold two rows differing only by case, which the seeder converges on
+-- boot. A unique index here would refuse to be created until it had.
+CREATE INDEX IF NOT EXISTS idx_indicators_name_ci ON indicators (upper(name));
+
 -- The FIXED knobs: what each one is called, what type it takes, what a form
 -- pre-fills and what bounds it should enforce.
 --

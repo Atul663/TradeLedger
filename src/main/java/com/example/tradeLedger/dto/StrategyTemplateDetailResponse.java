@@ -4,26 +4,35 @@ import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.time.OffsetDateTime;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 /**
- * A template plus everything needed to start configuring it: the rule tree, and
- * the indicators that tree names with their schemas.
+ * A template plus everything needed to start configuring it: the indicators its
+ * rule tree names, with their schemas.
  *
- * One GET is enough to draw the "new strategy" form. The instrument, strike,
- * ladder and exit fields are fixed platform concepts - typed columns on
- * {@code user_strategies} - so they are the same on every template and are not
- * described here.
+ * <b>Neither the rule tree nor the fixed knobs are here.</b> The tree is the
+ * platform's own logic and a form has nothing to do with it - what a form needs
+ * is what the tree RESOLVES to, which is {@link #indicators} and
+ * {@link #indicatorGroups}. The fixed knobs describe columns on
+ * {@code user_strategies}, so they are identical on every template and come from
+ * {@code GET /api/v1/fixed-parameters} once, rather than being repeated inside
+ * every entry of a list.
+ *
+ * Both used to be carried here and both were the cost of the list endpoint: the
+ * knobs alone re-read the whole symbols table once per template to fill the
+ * instrument select.
  */
 @Schema(name = "StrategyTemplateDetailResponse",
         description = """
                 A template and the indicators its rule tree names, each with its parameter schema.
 
-                One GET is enough to draw the "new strategy" form: indicators[].paramSchema is \
-                the only part that varies per template, because the instrument, strike, ladder \
-                and exit fields are fixed columns and identical everywhere - and those come \
-                back too, as fixedParameters[], grouped the way the form lays them out.""")
+                indicators[].paramSchema is the only part of a builder form that varies per \
+                template. The instrument, strike, ladder and exit fields are fixed columns, \
+                identical everywhere - fetch them ONCE from /api/v1/fixed-parameters rather than \
+                per template.
+
+                The rule tree itself is not returned: it is platform logic, and what a form \
+                needs from it is already resolved into indicators[] and indicatorGroups[].""")
 public record StrategyTemplateDetailResponse(
 
         @Schema(example = "3f1b0c7e-9a41-4c2e-9f11-2b7d5a6e8c01")
@@ -46,10 +55,6 @@ public record StrategyTemplateDetailResponse(
         @Schema(example = "true")
         boolean active,
 
-        @Schema(example = "{\"entry\": {\"ind\": \"EMA Averaging\", "
-                + "\"params\": {\"k\": \"$k\", \"d\": \"$d\"}}}")
-        Map<String, Object> ruleTree,
-
         @Schema(description = "The indicators the rule tree names, each with its schema.")
         List<IndicatorSummaryResponse> indicators,
 
@@ -58,12 +63,6 @@ public record StrategyTemplateDetailResponse(
                 + "tuning rows a strategy built from this template will carry. The arrangement "
                 + "a builder form walks; it matches the shape my-strategies returns.")
         List<StrategyTemplateIndicatorGroupResponse> indicatorGroups,
-
-        @Schema(description = "The platform's fixed knobs, grouped by paramGroup - market, "
-                + "instrument, sizing, exits. Descriptors only, because a template holds no "
-                + "values: the same sections the saved strategy returns, in the same order, so "
-                + "one form draws a blank template and a saved strategy alike.")
-        List<FixedParameterGroupResponse> fixedParameters,
 
         @Schema(description = "Names the rule tree references that resolve to no ACTIVE "
                 + "indicator. Non-empty means the tree is broken - block building on it, "
