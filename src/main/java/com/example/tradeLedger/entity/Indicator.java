@@ -16,8 +16,8 @@ import java.util.UUID;
  * a dynamic schema.</b> An indicator declares what it takes in
  * {@link #paramSchema} -
  *
- * <pre>{"k":{"type":"int","min":1,"max":300,"default":21},
- * "d":{"type":"int","min":1,"max":300,"default":9}}</pre>
+ * <pre>{"k":{"type":"int","min":1,"max":300,"default":21,"label":"Short (k)"},
+ * "d":{"type":"int","min":1,"max":300,"default":9,"label":"Long (d)"}}</pre>
  *
  * - and a user's concrete values live in {@code user_strategy_indicators.params}
  * as jsonb, validated against this schema on every write. Two tables, one FK
@@ -55,6 +55,16 @@ public class Indicator {
     public static final Set<String> TYPES =
             Set.of(TYPE_INT, TYPE_DECIMAL, TYPE_BOOL, TYPE_ENUM, TYPE_TEXT);
 
+    /**
+     * The optional display name of a parameter, inside its spec:
+     * {@code {"k":{"type":"int","default":21,"label":"Long (d)"}}}.
+     *
+     * Optional because an indicator is authored by hand and a catalogue predating
+     * labels must keep working; {@code IndicatorParams.labelled} fills the key in
+     * on the way out, so a form always has one to render.
+     */
+    public static final String KEY_LABEL = "label";
+
     @Id
     @GeneratedValue
     @Column(name = "id", nullable = false, updatable = false)
@@ -64,7 +74,7 @@ public class Indicator {
     @Column(name = "name", nullable = false, unique = true, length = 50)
     private String name;
 
-    /** e.g. {@code {"period":{"type":"int","min":2,"max":300}}} */
+    /** e.g. {@code {"period":{"type":"int","min":2,"max":300,"default":9,"label":"Period"}}} */
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "param_schema", nullable = false, columnDefinition = "jsonb")
     private String paramSchema;

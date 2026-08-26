@@ -23,8 +23,12 @@ public record IndicatorResponse(
                 example = "EMA Averaging")
         String name,
 
-        @Schema(example = "{\"k\": {\"type\":\"int\",\"min\":1,\"max\":300,\"default\":21}, "
-                + "\"d\": {\"type\":\"int\",\"min\":1,\"max\":300,\"default\":9,\"lt\":\"k\"}}")
+        @Schema(description = "label is always present on read - a parameter that declares none "
+                + "is labelled by its key.",
+                example = "{\"k\": {\"type\":\"int\",\"min\":1,\"max\":300,\"default\":21,"
+                        + "\"label\":\"Short (k)\"}, "
+                        + "\"d\": {\"type\":\"int\",\"min\":1,\"max\":300,\"default\":9,\"lt\":\"k\","
+                        + "\"label\":\"Long (d)\"}}")
         Map<String, Object> paramSchema,
 
         @Schema(example = "true")

@@ -278,7 +278,7 @@ public class StrategyTemplateServiceImpl implements StrategyTemplateService {
                         indicator.getId(),
                         indicator.getName(),
                         indicator.isActive(),
-                        json.toMap(indicator.getParamSchema()));
+                        IndicatorParams.labelled(json.toMap(indicator.getParamSchema())));
                 indicators.add(summary);
                 groups.add(new StrategyTemplateIndicatorGroupResponse(
                         indicator.getName(), named.getValue(), 1, List.of(summary)));

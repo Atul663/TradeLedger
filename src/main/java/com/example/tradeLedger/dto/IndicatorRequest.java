@@ -19,17 +19,26 @@ import java.util.Map;
                 for an enum, and gt/lt name another key of the SAME indicator for a cross-field \
                 rule.
 
-                The name is uppercased on save; rule trees match it by exact string.""")
+                label is optional and is what a form shows beside the field; a parameter \
+                without one is read back labelled by its key.
+
+                The name is trimmed on save and stored as written - rule trees name an \
+                indicator by exactly this string - and is matched without regard to case.""")
 public class IndicatorRequest {
 
-    @Schema(description = "Uppercased on save. Unique.", example = "SUPERTREND", maxLength = 50)
+    @Schema(description = "Trimmed on save, otherwise stored as written - a rule tree names an "
+            + "indicator by this string. Unique, matched without regard to case.",
+            example = "Supertrend Follow", maxLength = 50)
     private String name;
 
-    @Schema(description = "The whole parameter declaration.",
-            example = "{\"period\": {\"type\":\"int\",\"min\":1,\"max\":100,\"default\":10}, "
-                    + "\"multiplier\": {\"type\":\"decimal\",\"min\":0.5,\"max\":10,\"default\":3.0}, "
+    @Schema(description = "The whole parameter declaration. label is optional and is what a form "
+            + "shows beside the field; a parameter without one is read back labelled by its key.",
+            example = "{\"period\": {\"type\":\"int\",\"min\":1,\"max\":100,\"default\":10,"
+                    + "\"label\":\"ATR period\"}, "
+                    + "\"multiplier\": {\"type\":\"decimal\",\"min\":0.5,\"max\":10,\"default\":3.0,"
+                    + "\"label\":\"ATR multiplier\"}, "
                     + "\"source\": {\"type\":\"enum\",\"options\":[\"close\",\"hl2\",\"hlc3\"],"
-                    + "\"default\":\"close\"}}")
+                    + "\"default\":\"close\",\"label\":\"Price source\"}}")
     private Map<String, Object> paramSchema;
 
     @Schema(description = "Inactive indicators fail rule-tree validation.",

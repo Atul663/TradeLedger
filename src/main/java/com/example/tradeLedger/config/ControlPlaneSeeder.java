@@ -14,6 +14,9 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
+import java.util.Map;
+
 /**
  * Seeds the platform catalog: the indicators, the templates whose rule trees use
  * them, and the descriptors of the fixed knobs a form renders.
@@ -50,27 +53,12 @@ public class ControlPlaneSeeder implements ApplicationRunner {
     private static final Logger log = LoggerFactory.getLogger(ControlPlaneSeeder.class);
 
     public static final String EMA_CROSSOVER = "EMA Crossover";
-    public static final String EMA_CROSSOVER_INDICATOR = "EMA Crossover";
-
     public static final String EMA_AVERAGING = "EMA Averaging";
-    public static final String EMA_AVERAGING_INDICATOR = "EMA Averaging";
-
-    /**
-     * The classic crossover: a fast leg and a slow one, so {@code d} must exceed
-     * {@code k}.
-     */
-    private static final String EMA_CROSSOVER_SCHEMA = """
-            {"k":{"type":"int","min":1,"max":300,"default":9},\
-            "d":{"type":"int","min":1,"max":300,"default":21,"gt":"k"}}""";
-
-    /**
-     * The averaging variant: {@code k} is the EMA of the highs and {@code d} the
-     * shorter signal leg, so the constraint runs the other way - 21/9 and 50/21
-     * are both valid, 9/21 is not.
-     */
-    private static final String EMA_AVERAGING_SCHEMA = """
-            {"k":{"type":"int","min":1,"max":300,"default":21},\
-            "d":{"type":"int","min":1,"max":300,"default":9,"lt":"k"}}""";
+    public static final String RSI_REVERSAL = "RSI Reversal";
+    public static final String MACD_MOMENTUM = "MACD Momentum";
+    public static final String BOLLINGER_BREAKOUT = "Bollinger Breakout";
+    public static final String SUPERTREND_FOLLOW = "Supertrend Follow";
+    public static final String STOCHASTIC_CROSS = "Stochastic Cross";
 
     /** The sections a strategy form is laid out in, and the order they appear. */
     private static final String GROUP_MARKET = "Market";
@@ -90,11 +78,141 @@ public class ControlPlaneSeeder implements ApplicationRunner {
     private static final String PERCENT_BOUNDS = """
             {"min":0,"max":100}""";
 
-    private static final String EMA_CROSSOVER_TREE = """
-            {"entry":{"ind":"EMA Crossover","params":{"k":"$k","d":"$d"}}}""";
+    /**
+     * One strategy type: the indicator that computes its signal, and the template
+     * whose rule tree binds that indicator's knobs.
+     *
+     * The two carry the SAME name on purpose. A template is logic and nothing else
+     * and every other setting a strategy has is a fixed column, so a strategy type
+     * really is one indicator plus the one-node tree that names it - splitting the
+     * two names would only invite them to drift.
+     *
+     * @param paramSchema the indicator's ENTIRE parameter declaration, labels included
+     * @param ruleTree    binds each schema key as {@code "$key"}
+     */
+    public record Strategy(String name, String paramSchema, String ruleTree, String description) {
+    }
 
-    private static final String EMA_AVERAGING_TREE = """
-            {"entry":{"ind":"EMA Averaging","params":{"k":"$k","d":"$d"}}}""";
+    /**
+     * The catalogue, in the order a strategy list shows it.
+     *
+     * Adding a strategy type is one entry here. Every schema is validated and every
+     * tree resolved against its own defaults by ControlPlaneSeedTest, which is what
+     * keeps a typo in this table from becoming a failed boot.
+     */
+    public static final List<Strategy> STRATEGIES = List.of(
+            new Strategy(EMA_CROSSOVER,
+                    // The classic crossover: a fast leg and a slow one, so d must exceed k.
+                    """
+                    {"k":{"type":"int","min":1,"max":300,"default":9,"label":"Short (k)"},\
+                    "d":{"type":"int","min":1,"max":300,"default":21,"gt":"k",\
+                    "label":"Long (d)"}}""",
+                    """
+                    {"entry":{"ind":"EMA Crossover","params":{"k":"$k","d":"$d"}}}""",
+                    "Long when the fast leg crosses above the slow leg; exit on the reverse "
+                            + "cross or on SL/TP."),
+
+            new Strategy(EMA_AVERAGING,
+                    // The averaging variant: k is the EMA of the highs and d the shorter
+                    // signal leg, so the constraint runs the other way - 21/9 and 50/21 are
+                    // both valid, 9/21 is not.
+                    //
+                    // The labels are the platform's existing pair, keyed to the letter rather
+                    // than to which leg is longer here - so on THIS indicator "Short (k)" sits
+                    // on the longer leg. Left as it is because a user reads the same two labels
+                    // on every EMA strategy; swapping them only here would be the surprise.
+                    """
+                    {"k":{"type":"int","min":1,"max":300,"default":21,\
+                    "label":"Short (k)"},\
+                    "d":{"type":"int","min":1,"max":300,"default":9,"lt":"k",\
+                    "label":"Long (d)"}}""",
+                    """
+                    {"entry":{"ind":"EMA Averaging","params":{"k":"$k","d":"$d"}}}""",
+                    "EMA of the highs against a shorter signal leg, traded through options or "
+                            + "the future, with a configurable averaging ladder."),
+
+            new Strategy(RSI_REVERSAL,
+                    """
+                    {"period":{"type":"int","min":2,"max":100,"default":14,\
+                    "label":"RSI period"},\
+                    "oversold":{"type":"int","min":1,"max":49,"default":30,\
+                    "label":"Oversold level"},\
+                    "overbought":{"type":"int","min":51,"max":99,"default":70,"gt":"oversold",\
+                    "label":"Overbought level"}}""",
+                    """
+                    {"entry":{"ind":"RSI Reversal","params":{"period":"$period",\
+                    "oversold":"$oversold","overbought":"$overbought"}}}""",
+                    "Long when RSI turns up out of oversold; exit when it reaches overbought "
+                            + "or on SL/TP."),
+
+            new Strategy(MACD_MOMENTUM,
+                    """
+                    {"fast":{"type":"int","min":1,"max":200,"default":12,\
+                    "label":"Fast EMA period"},\
+                    "slow":{"type":"int","min":2,"max":300,"default":26,"gt":"fast",\
+                    "label":"Slow EMA period"},\
+                    "signal":{"type":"int","min":1,"max":100,"default":9,\
+                    "label":"Signal line period"}}""",
+                    """
+                    {"entry":{"ind":"MACD Momentum","params":{"fast":"$fast","slow":"$slow",\
+                    "signal":"$signal"}}}""",
+                    "Long when the MACD line crosses above its signal line; exit on the "
+                            + "reverse cross or on SL/TP."),
+
+            new Strategy(BOLLINGER_BREAKOUT,
+                    """
+                    {"period":{"type":"int","min":2,"max":300,"default":20,\
+                    "label":"Moving average period"},\
+                    "stdDev":{"type":"decimal","min":0.5,"max":5,"default":2,\
+                    "label":"Band width (standard deviations)"},\
+                    "band":{"type":"enum","options":["UPPER","LOWER","BOTH"],"default":"BOTH",\
+                    "label":"Which band a break must cross"}}""",
+                    """
+                    {"entry":{"ind":"Bollinger Breakout","params":{"period":"$period",\
+                    "stdDev":"$stdDev","band":"$band"}}}""",
+                    "Long when price closes outside the selected Bollinger band; exit on a "
+                            + "return to the middle band or on SL/TP."),
+
+            new Strategy(SUPERTREND_FOLLOW,
+                    """
+                    {"atrPeriod":{"type":"int","min":1,"max":100,"default":10,\
+                    "label":"ATR period"},\
+                    "multiplier":{"type":"decimal","min":0.5,"max":10,"default":3,\
+                    "label":"ATR multiplier"}}""",
+                    """
+                    {"entry":{"ind":"Supertrend Follow","params":{"atrPeriod":"$atrPeriod",\
+                    "multiplier":"$multiplier"}}}""",
+                    "Long while Supertrend reads up, flat while it reads down - a trend "
+                            + "follower with the ATR band as its stop."),
+
+            new Strategy(STOCHASTIC_CROSS,
+                    """
+                    {"kPeriod":{"type":"int","min":1,"max":100,"default":14,\
+                    "label":"%K period"},\
+                    "dPeriod":{"type":"int","min":1,"max":100,"default":3,\
+                    "label":"%D period"},\
+                    "smooth":{"type":"int","min":1,"max":20,"default":3,\
+                    "label":"%K smoothing"}}""",
+                    """
+                    {"entry":{"ind":"Stochastic Cross","params":{"kPeriod":"$kPeriod",\
+                    "dPeriod":"$dPeriod","smooth":"$smooth"}}}""",
+                    "Long when %K crosses above %D from below; exit on the reverse cross or "
+                            + "on SL/TP."));
+
+    /**
+     * Primitives, for the templates that will use them singly.
+     *
+     * No template of their own: they compute one number rather than a signal, and
+     * exist so a tree can name an EMA or an RSI directly.
+     */
+    public static final Map<String, String> PRIMITIVES = Map.of(
+            "EMA", """
+                    {"period":{"type":"int","min":2,"max":300,"default":9,\
+                    "label":"Period"}}""",
+            "RSI", """
+                    {"period":{"type":"int","min":2,"max":100,"default":14,\
+                    "label":"Period"}}""");
+
 
     private final IndicatorRepository indicatorRepository;
     private final StrategyTemplateRepository templateRepository;
@@ -122,14 +240,8 @@ public class ControlPlaneSeeder implements ApplicationRunner {
     // ------------------------------------------------------------ indicators
 
     private void seedIndicators() {
-        seedIndicator(EMA_CROSSOVER_INDICATOR, EMA_CROSSOVER_SCHEMA);
-        seedIndicator(EMA_AVERAGING_INDICATOR, EMA_AVERAGING_SCHEMA);
-
-        // Primitives, for the templates that will use them singly.
-        seedIndicator("EMA", """
-                {"period":{"type":"int","min":2,"max":300,"default":9}}""");
-        seedIndicator("RSI", """
-                {"period":{"type":"int","min":2,"max":100,"default":14}}""");
+        STRATEGIES.forEach(s -> seedIndicator(s.name(), s.paramSchema()));
+        PRIMITIVES.forEach(this::seedIndicator);
     }
 
     /**
@@ -173,11 +285,7 @@ public class ControlPlaneSeeder implements ApplicationRunner {
     // ------------------------------------------------------------- templates
 
     private void seedTemplates() {
-        seedTemplate(EMA_CROSSOVER, EMA_CROSSOVER_TREE,
-                "Long when the fast leg crosses above the slow leg; exit on the reverse cross or on SL/TP.");
-        seedTemplate(EMA_AVERAGING, EMA_AVERAGING_TREE,
-                "EMA of the highs against a shorter signal leg, traded through options or the future, "
-                        + "with a configurable averaging ladder.");
+        STRATEGIES.forEach(s -> seedTemplate(s.name(), s.ruleTree(), s.description()));
     }
 
     private void seedTemplate(String name, String ruleTree, String description) {

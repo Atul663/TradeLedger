@@ -144,6 +144,11 @@ public class StrategyTemplateValidator {
             if (!(type instanceof String typeName) || !Indicator.TYPES.contains(typeName)) {
                 errors.add("paramSchema." + name + ".type must be one of " + Indicator.TYPES);
             }
+            Object label = spec.get(Indicator.KEY_LABEL);
+            if (label != null && !(label instanceof String text && !text.isBlank())) {
+                errors.add("paramSchema." + name + ".label must be a non-empty string - "
+                        + "omit it entirely to be labelled by the key");
+            }
             if (spec.get("default") == null) {
                 errors.add("paramSchema." + name + ".default is required - it is what applies "
                         + "to every user who never sets this knob");

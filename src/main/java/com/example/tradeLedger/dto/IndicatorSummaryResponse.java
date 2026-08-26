@@ -27,8 +27,11 @@ public record IndicatorSummaryResponse(
         boolean active,
 
         @Schema(description = "type is one of int/decimal/bool/enum/text; default is always "
-                + "present; min, max, options and a gt/lt sibling rule are optional.",
-                example = "{\"k\": {\"type\":\"int\",\"min\":1,\"max\":300,\"default\":21}, "
-                        + "\"d\": {\"type\":\"int\",\"min\":1,\"max\":300,\"default\":9,\"lt\":\"k\"}}")
+                + "present; label is always present on read, falling back to the key; min, max, "
+                + "options and a gt/lt sibling rule are optional.",
+                example = "{\"k\": {\"type\":\"int\",\"min\":1,\"max\":300,\"default\":21,"
+                        + "\"label\":\"Short (k)\"}, "
+                        + "\"d\": {\"type\":\"int\",\"min\":1,\"max\":300,\"default\":9,\"lt\":\"k\","
+                        + "\"label\":\"Long (d)\"}}")
         Map<String, Object> paramSchema) {
 }

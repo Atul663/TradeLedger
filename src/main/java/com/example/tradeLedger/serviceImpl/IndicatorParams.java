@@ -105,6 +105,37 @@ public class IndicatorParams {
         return effective(indicator, Map.of());
     }
 
+    /**
+     * The schema as a form should read it: every parameter carrying a {@code label}.
+     *
+     * Filled on the way OUT rather than demanded on the way in, the same way
+     * {@code FixedParameterOptions} fills a select's options. A label is
+     * presentation - requiring one would 400 every catalogue entry written before
+     * labels existed, and an indicator is the one thing on this platform an
+     * operator plugs in by hand. A parameter that names none is labelled by its
+     * key, which is what a form fell back to anyway.
+     */
+    public static Map<String, Object> labelled(Map<String, Object> paramSchema) {
+        if (paramSchema == null) {
+            return Map.of();
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        paramSchema.forEach((key, value) -> {
+            if (!(value instanceof Map<?, ?> spec)) {
+                out.put(key, value);
+                return;
+            }
+            Map<String, Object> copy = new LinkedHashMap<>();
+            spec.forEach((k, v) -> copy.put(String.valueOf(k), v));
+            Object label = copy.get(Indicator.KEY_LABEL);
+            if (!(label instanceof String text) || text.isBlank()) {
+                copy.put(Indicator.KEY_LABEL, key);
+            }
+            out.put(key, copy);
+        });
+        return out;
+    }
+
     // ---------------------------------------------------------------- helpers
 
     @SuppressWarnings("unchecked")

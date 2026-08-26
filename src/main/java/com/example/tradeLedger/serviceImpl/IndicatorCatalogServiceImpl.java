@@ -259,7 +259,7 @@ public class IndicatorCatalogServiceImpl implements IndicatorCatalogService {
         return new IndicatorResponse(
                 def.getId(),
                 def.getName(),
-                json.toMap(def.getParamSchema()),
+                IndicatorParams.labelled(json.toMap(def.getParamSchema())),
                 def.isActive(),
                 strategiesUsing(def.getName()),
                 def.getCreatedAt());
