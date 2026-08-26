@@ -68,7 +68,7 @@ public class IndicatorCatalogServiceImpl implements IndicatorCatalogService {
     @Override
     @Transactional(readOnly = true)
     public IndicatorResponse getByName(String name) {
-        Indicator def = indicatorRepository.findByName(validator.normalizeIndicatorName(name))
+        Indicator def = indicatorRepository.findByNameIgnoreCase(validator.normalizeIndicatorName(name))
                 .orElseThrow(() -> ResourceNotFoundException.of("Indicator", name));
         return toResponse(def);
     }
@@ -92,7 +92,7 @@ public class IndicatorCatalogServiceImpl implements IndicatorCatalogService {
         if (!errors.isEmpty()) {
             throw new StrategyValidationException(errors);
         }
-        if (indicatorRepository.existsByName(name)) {
+        if (indicatorRepository.existsByNameIgnoreCase(name)) {
             throw new ResourceConflictException("Indicator already exists: " + name);
         }
 
@@ -136,7 +136,8 @@ public class IndicatorCatalogServiceImpl implements IndicatorCatalogService {
                 throw new ResourceConflictException("Indicator '" + def.getName()
                         + "' cannot be renamed while referenced by strategy rule trees: " + users);
             }
-            if (indicatorRepository.existsByName(name)) {
+            // equalsIgnoreCase first: a case-only rename would otherwise collide with itself.
+            if (!name.equalsIgnoreCase(def.getName()) && indicatorRepository.existsByNameIgnoreCase(name)) {
                 throw new ResourceConflictException("Indicator already exists: " + name);
             }
             def.setName(name);

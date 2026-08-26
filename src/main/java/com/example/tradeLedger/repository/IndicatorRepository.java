@@ -12,7 +12,17 @@ public interface IndicatorRepository extends JpaRepository<Indicator, UUID> {
     /** indicators.name is UNIQUE and is what a rule tree's "ind" value resolves to. */
     Optional<Indicator> findByName(String name);
 
+    /**
+     * Names are stored in their display casing ('EMA Averaging'), so every lookup that
+     * starts from user input matches without regard to case - otherwise the casing a
+     * caller happens to type decides whether a catalogued indicator exists.
+     */
+    Optional<Indicator> findByNameIgnoreCase(String name);
+
     boolean existsByName(String name);
+
+    /** Guards the UNIQUE name against a duplicate that differs only by case. */
+    boolean existsByNameIgnoreCase(String name);
 
     List<Indicator> findAllByOrderByNameAsc();
 

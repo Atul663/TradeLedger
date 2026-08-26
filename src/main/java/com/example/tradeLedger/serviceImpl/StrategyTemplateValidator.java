@@ -10,7 +10,6 @@ import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -66,7 +65,7 @@ public class StrategyTemplateValidator {
 
         Set<String> declaredKeys = new LinkedHashSet<>();
         for (String name : names) {
-            Optional<Indicator> found = indicatorRepository.findByName(name);
+            Optional<Indicator> found = indicatorRepository.findByNameIgnoreCase(name);
             if (found.isEmpty()) {
                 errors.add("ruleTree references unknown indicator '" + name + "'");
                 continue;
@@ -178,8 +177,12 @@ public class StrategyTemplateValidator {
         return errors;
     }
 
-    /** Indicator names are matched by exact string against rule trees, so they are normalized. */
+    /**
+     * Trim only - the stored casing is the display casing ('EMA Averaging'), and it is
+     * what a rule tree's "ind" value carries. Upper-casing here would write a name no
+     * tree can name and no lookup can find.
+     */
     public String normalizeIndicatorName(String name) {
-        return name == null ? null : name.trim().toUpperCase(Locale.ROOT);
+        return name == null ? null : name.trim();
     }
 }

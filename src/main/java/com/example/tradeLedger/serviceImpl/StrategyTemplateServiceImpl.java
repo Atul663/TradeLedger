@@ -269,7 +269,7 @@ public class StrategyTemplateServiceImpl implements StrategyTemplateService {
             // builder form needs - it is how many tuning rows it has to draw.
             for (Map.Entry<String, Integer> named : IndicatorResolver.indicatorNameCounts(tree).entrySet()) {
                 String name = named.getKey();
-                Indicator indicator = indicatorRepository.findByName(name).orElse(null);
+                Indicator indicator = indicatorRepository.findByNameIgnoreCase(name).orElse(null);
                 if (indicator == null || !indicator.isActive()) {
                     unknown.add(name);
                     continue;

@@ -142,7 +142,10 @@ public class ControlPlaneSeeder implements ApplicationRunner {
      * rather than silently changing what anyone runs today.
      */
     private void seedIndicator(String name, String paramSchema) {
-        Indicator indicator = indicatorRepository.findByName(name).orElse(null);
+        // Matched without case so a row a caller created under different casing is
+        // converged rather than duplicated beside this one - indicators.name is
+        // UNIQUE but case-sensitively so, and both would otherwise survive.
+        Indicator indicator = indicatorRepository.findByNameIgnoreCase(name).orElse(null);
         if (indicator == null) {
             indicator = new Indicator();
             indicator.setName(name);
@@ -151,10 +154,19 @@ public class ControlPlaneSeeder implements ApplicationRunner {
             log.info("Seeded indicator {} id={}", name, indicatorRepository.save(indicator).getId());
             return;
         }
+        boolean changed = false;
+        if (!name.equals(indicator.getName())) {
+            log.info("Converged indicator '{}' onto its catalogued casing '{}'", indicator.getName(), name);
+            indicator.setName(name);
+            changed = true;
+        }
         if (!paramSchema.equals(indicator.getParamSchema())) {
             indicator.setParamSchema(paramSchema);
-            indicatorRepository.save(indicator);
+            changed = true;
             log.info("Converged indicator {} onto the current parameter schema", name);
+        }
+        if (changed) {
+            indicatorRepository.save(indicator);
         }
     }
 

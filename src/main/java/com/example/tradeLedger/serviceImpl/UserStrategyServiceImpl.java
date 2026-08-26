@@ -320,7 +320,7 @@ public class UserStrategyServiceImpl implements UserStrategyService {
     private void seedIndicatorRows(UserStrategy strategy, StrategyTemplate template) {
         int order = 0;
         for (String name : IndicatorResolver.indicatorNames(json.readTree(template.getRuleTree()))) {
-            Indicator indicator = indicatorRepository.findByName(name).orElseThrow(() ->
+            Indicator indicator = indicatorRepository.findByNameIgnoreCase(name).orElseThrow(() ->
                     new StrategyValidationException("Template " + template.getName()
                             + " references unknown indicator " + name
                             + " - the template cannot be used until its catalog entry exists"));
@@ -495,8 +495,8 @@ public class UserStrategyServiceImpl implements UserStrategyService {
 
         UUID indicatorId = tuning.getIndicatorId();
         if (indicatorId == null && tuning.getIndicatorName() != null) {
-            String name = tuning.getIndicatorName().trim().toUpperCase(java.util.Locale.ROOT);
-            indicatorId = indicatorRepository.findByName(name)
+            String name = tuning.getIndicatorName().trim();
+            indicatorId = indicatorRepository.findByNameIgnoreCase(name)
                     .orElseThrow(() -> ResourceNotFoundException.of("Indicator", name))
                     .getId();
         }
