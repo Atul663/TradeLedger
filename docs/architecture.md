@@ -401,6 +401,7 @@ never drift from the strategy it claims to run.
 | `TradingAccount` → `trading_accounts` | Belongs to a `UserBroker`; `account_name` UNIQUE within it. **No exchange** — the symbol decides the venue |
 | `Broker` → `brokers` | `code` unique. `auth_type` says which credential fields that broker needs |
 | `BrokerCredential` → `broker_credentials` | Two levels: `trading_account_id` NULL is the setup's key, set is one account's override. Resolution is **per field**. AES-GCM ciphertext via `SecretCipher` |
+| `BrokerCredentialField` → `broker_credential_fields` | Descriptor catalog for the credential form: one row per (broker, `broker_credentials` column) with label, `data_type`, placeholder, validation, order, required/secret. `fixed_parameters` for brokers — a new broker is an INSERT, not a UI release |
 | `RiskProfile` → `risk_profiles` | Reusable per-deployment caps |
 | `UserRiskLimit` → `user_risk_limits` | **PK is `user_id`** — one row per user, aggregate caps |
 
@@ -741,6 +742,9 @@ All strategy-module endpoints require `Authorization: Bearer <accessToken>`.
 | GET/PUT/DELETE | `/api/v1/trading-accounts/{id}`, `/{id}/credentials` | Masked on read; PUT is partial; `""` clears |
 | GET/POST/PUT/DELETE | `/api/v1/exchanges`, `/symbols`, `/risk-profiles` | Reference data. **Shared master data** — writes are not role-gated; deletes are refused while referenced |
 | GET/POST/PUT/DELETE | `/api/v1/brokers` | The broker catalog. **Shared master data** — writes are not role-gated yet |
+| GET | `/api/v1/broker-credential-fields?brokerId=&brokerCode=&group=&active=` | One broker's credential form: the label, type, placeholder, bounds and order of each input, in form order. `group=credentials` is what the user types, `group=session` what the auth flow fills |
+| GET | `/api/v1/broker-credential-fields/{id}`, `/by-key?brokerId=&fieldKey=` | `fieldKey` matched case-insensitively |
+| POST/PUT/DELETE | `/api/v1/broker-credential-fields`, `/{id}` | **Descriptors, not credentials** — `fieldKey` must name a real `broker_credentials` column and is unique per broker; a `secret` field is refused a `defaultValue`. Shared master data, not role-gated yet |
 | GET/PUT | `/api/v1/me/risk-limits` | Aggregate caps |
 | GET/POST/PUT/DELETE | `/api/v1/strategy-toggles/...` | Legacy platform switches, unrelated to templates |
 

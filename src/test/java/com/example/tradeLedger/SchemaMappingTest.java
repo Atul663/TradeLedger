@@ -42,7 +42,8 @@ class SchemaMappingTest {
      */
     private static final List<Class<?>> ENTITIES = List.of(
             User.class, Exchange.class, Symbol.class, Broker.class, UserBroker.class,
-            TradingAccount.class, BrokerCredential.class, RiskProfile.class, UserRiskLimit.class,
+            TradingAccount.class, BrokerCredential.class, BrokerCredentialField.class,
+            RiskProfile.class, UserRiskLimit.class,
             Indicator.class, FixedParameter.class, StrategyTemplate.class, SharedStrategyConfig.class,
             UserStrategy.class, UserStrategyIndicator.class, StrategySubscription.class,
             GoogleAuthToken.class, PlatformStrategyToggle.class);
@@ -195,6 +196,36 @@ class SchemaMappingTest {
             assertFalse(columns.contains(value),
                     "fixed_parameters holds " + value + " - it is a descriptor catalog, "
                             + "not a value store");
+        }
+    }
+
+    /**
+     * broker_credential_fields describes the credential form; it must never come
+     * to HOLD a credential.
+     *
+     * The same line fixed_parameters walks, and easier to cross here because the
+     * thing being described IS a secret. A user or account foreign key, or an
+     * api_key column, would make this a second copy of broker_credentials with no
+     * encryption behind it - so the absence is asserted rather than left to
+     * review.
+     */
+    @Test
+    void brokerCredentialFieldsDescribesTheFormWithoutHoldingACredential() {
+        Table table = table(metadata(), BrokerCredentialField.class);
+        Set<String> columns = columns(table);
+
+        assertEquals("broker_credential_fields", table.getName());
+        for (String descriptor : List.of("broker_id", "field_key", "label", "description",
+                "placeholder", "data_type", "default_value", "validation", "field_group",
+                "display_order", "is_required", "is_user_supplied")) {
+            assertTrue(columns.contains(descriptor),
+                    "broker_credential_fields is missing " + descriptor + ": " + columns);
+        }
+        for (String value : List.of("user_id", "user_broker_id", "trading_account_id",
+                "api_key", "api_secret", "access_token", "totp_secret", "custom_value")) {
+            assertFalse(columns.contains(value),
+                    "broker_credential_fields holds " + value + " - it is a descriptor "
+                            + "catalog, not a credential store");
         }
     }
 }

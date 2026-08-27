@@ -40,6 +40,7 @@ class SwaggerExamplesTest {
             StrategyTemplateController.class,
             IndicatorController.class,
             FixedParameterController.class,
+            BrokerCredentialFieldController.class,
             ReferenceDataController.class);
 
     /** DTOs whose @Schema examples are JSON objects rather than scalars. */
@@ -60,7 +61,9 @@ class SwaggerExamplesTest {
             com.example.tradeLedger.dto.SymbolRequest.class,
             com.example.tradeLedger.dto.RiskProfileRequest.class,
             com.example.tradeLedger.dto.FixedParameterRequest.class,
-            com.example.tradeLedger.dto.FixedParameterResponse.class);
+            com.example.tradeLedger.dto.FixedParameterResponse.class,
+            com.example.tradeLedger.dto.BrokerCredentialFieldRequest.class,
+            com.example.tradeLedger.dto.BrokerCredentialFieldResponse.class);
 
     @Test
     void everyRequestBodyExampleIsValidJson() {
