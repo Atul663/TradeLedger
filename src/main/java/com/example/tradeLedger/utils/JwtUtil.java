@@ -7,8 +7,21 @@ import java.security.Key;
 import java.util.Date;
 public class JwtUtil {
 
-    private static final String SECRET = System.getenv("JWT_SECRET");
+    // Checked rather than dereferenced: an unset variable would otherwise
+    // surface as an ExceptionInInitializerError from a static initialiser on the
+    // first request, which says nothing about the missing configuration.
+    private static final String SECRET = requireEnv("JWT_SECRET");
     private static final Key key = Keys.hmacShaKeyFor(SECRET.getBytes());
+
+    private static String requireEnv(String name) {
+        String value = System.getenv(name);
+        if (value == null || value.isBlank()) {
+            throw new IllegalStateException(
+                    name + " is not set. Add it to the service environment - at least 32 bytes, "
+                            + "e.g. openssl rand -base64 32");
+        }
+        return value;
+    }
 
     private static final long ACCESS_EXP = 1000L * 60 * 60 * 24; // 1 day
     private static final long REFRESH_EXP = 1000L * 60 * 60 * 24 * 7; // 7 days

@@ -1,5 +1,13 @@
 target/
 .git/
+.gitignore
+.gitattributes
 .idea/
+.vscode/
 *.md
+docs/
 .env
+.DS_Store
+nginx/
+docker-compose.yml
+render.yaml

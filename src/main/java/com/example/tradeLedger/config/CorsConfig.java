@@ -9,6 +9,12 @@ import org.springframework.web.servlet.config.annotation.*;
 @Configuration
 public class CorsConfig {
 
+    private final FrontendOrigins frontendOrigins;
+
+    public CorsConfig(FrontendOrigins frontendOrigins) {
+        this.frontendOrigins = frontendOrigins;
+    }
+
     @Bean
     public ObjectMapper objectMapper() {
         return new ObjectMapper();
@@ -25,17 +31,12 @@ public class CorsConfig {
             @Override
             public void addCorsMappings(CorsRegistry registry) {
 
+                // The origins live in app.cors.allowed-origins so the Vercel URL
+                // is set per environment. allowCredentials is on because the
+                // refresh cookie is cross-site, which is also why patterns are
+                // used instead of "*" - the two are mutually exclusive.
                 registry.addMapping("/**")
-                        .allowedOriginPatterns(
-                                "https://trade-pnl-analysis.vercel.app",
-                                "https://prowfin.proweltconsulting.com",
-                                "https://www.prowfin.proweltconsulting.com",
-                                "https://api.prowfin.proweltconsulting.com",
-                                "http://localhost:5173",
-                                "http://127.0.0.1:5173",
-                                "http://localhost:*",
-                                "http://127.0.0.1:*"
-                        )
+                        .allowedOriginPatterns(frontendOrigins.patterns())
                         .allowedMethods("*")
                         .allowedHeaders("*")
                         .allowCredentials(true);

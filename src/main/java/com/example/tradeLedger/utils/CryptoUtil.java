@@ -9,7 +9,19 @@ public class CryptoUtil {
     private static final String ALGO = "AES";
 
     // 🔐 MUST be 16/24/32 bytes (use ENV variable in real)
-    private static final String SECRET = System.getenv("TOKEN_SECRET");
+    // Checked rather than dereferenced: an unset variable would otherwise
+    // surface as an ExceptionInInitializerError from a static initialiser on the
+    // first request, which says nothing about the missing configuration.
+    private static final String SECRET = requireEnv("TOKEN_SECRET");
+
+    private static String requireEnv(String name) {
+        String value = System.getenv(name);
+        if (value == null || value.isBlank()) {
+            throw new IllegalStateException(
+                    name + " is not set. Add it to the service environment - exactly 16, 24 or 32 bytes.");
+        }
+        return value;
+    }
 
     private static SecretKeySpec getKey() {
         return new SecretKeySpec(SECRET.getBytes(), ALGO);

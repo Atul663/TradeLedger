@@ -1,5 +1,6 @@
 package com.example.tradeLedger.serviceImpl;
 
+import com.example.tradeLedger.config.FrontendOrigins;
 import com.example.tradeLedger.entity.GoogleAuthToken;
 import com.example.tradeLedger.repository.GoogleAuthTokenRepository;
 import com.example.tradeLedger.service.GoogleAuthService;
@@ -17,7 +18,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
-import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
@@ -27,6 +27,7 @@ public class GoogleAuthServiceImpl implements GoogleAuthService {
 
     private final GoogleAuthTokenService googleAuthTokenService;
     private final GoogleAuthTokenRepository googleAuthTokenRepository;
+    private final FrontendOrigins frontendOrigins;
 
     @Value("${google.client.id}")
     private String clientId;
@@ -34,20 +35,36 @@ public class GoogleAuthServiceImpl implements GoogleAuthService {
     @Value("${google.client.secret}")
     private String clientSecret;
 
-    private static final String GOOGLE_CALLBACK_URL = "https://api.prowfin.proweltconsulting.com/api/v1/auth/callback";
-    private static final String DEFAULT_FRONTEND_BASE_URL =
-            "https://trade-pnl-analysis.vercel.app";
+    /**
+     * Where Google sends the browser back.
+     *
+     * Must match one of the "Authorized redirect URIs" on the OAuth client
+     * byte-for-byte, and is sent twice - once to start the flow, once to redeem
+     * the code - so both uses read this one field. On Render it defaults to the
+     * external URL of the service, which the platform injects, so a first deploy
+     * only needs that value pasting into the Google console.
+     */
+    private final String googleCallbackUrl;
+
+    /** Where a login lands when the caller asked for nowhere in particular. */
+    private final String defaultFrontendBaseUrl;
 
     public GoogleAuthServiceImpl(GoogleAuthTokenService googleAuthTokenService,
-                                 GoogleAuthTokenRepository googleAuthTokenRepository) {
+                                 GoogleAuthTokenRepository googleAuthTokenRepository,
+                                 FrontendOrigins frontendOrigins,
+                                 @Value("${app.oauth.google.callback-url}") String googleCallbackUrl,
+                                 @Value("${app.frontend.base-url}") String defaultFrontendBaseUrl) {
         this.googleAuthTokenService = googleAuthTokenService;
         this.googleAuthTokenRepository = googleAuthTokenRepository;
+        this.frontendOrigins = frontendOrigins;
+        this.googleCallbackUrl = googleCallbackUrl.trim();
+        this.defaultFrontendBaseUrl = stripTrailingSlash(defaultFrontendBaseUrl.trim());
     }
 
     @Override
     public void googleLogin(String redirect, HttpServletResponse response) throws Exception {
         String frontendBaseUrl = resolveRedirectBaseUrl(redirect);
-        String encodedCallbackUrl = URLEncoder.encode(GOOGLE_CALLBACK_URL, StandardCharsets.UTF_8);
+        String encodedCallbackUrl = URLEncoder.encode(googleCallbackUrl, StandardCharsets.UTF_8);
         String encodedScope = URLEncoder.encode(
                 "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/userinfo.email",
                 StandardCharsets.UTF_8
@@ -76,7 +93,7 @@ public class GoogleAuthServiceImpl implements GoogleAuthService {
                         clientId,
                         clientSecret,
                         code,
-                        GOOGLE_CALLBACK_URL
+                        googleCallbackUrl
                 ).execute();
 
         String googleAccessToken = tokenResponse.getAccessToken();
@@ -170,6 +187,9 @@ public class GoogleAuthServiceImpl implements GoogleAuthService {
         cookie.setSecure(true);
         cookie.setPath("/");
         cookie.setMaxAge(maxAge);
+        // The UI is on a different site to the API - Vercel and Render are not
+        // even the same registrable domain - so the browser drops this cookie on
+        // any weaker pairing than SameSite=None with Secure.
         cookie.setAttribute("SameSite", "None");
         return cookie;
     }
@@ -209,7 +229,7 @@ public class GoogleAuthServiceImpl implements GoogleAuthService {
     }
 
     private String buildFrontendTradesUrl(String state) {
-        String baseUrl = DEFAULT_FRONTEND_BASE_URL;
+        String baseUrl = defaultFrontendBaseUrl;
 
         if (state != null && !state.isBlank()) {
             baseUrl = resolveRedirectBaseUrl(state);
@@ -226,23 +246,20 @@ public class GoogleAuthServiceImpl implements GoogleAuthService {
         return baseUrl + "/create-plan";
     }
 
+    /**
+     * Honours the caller-supplied {@code ?redirect=} only when its origin is on
+     * the configured allow-list, and falls back to the default otherwise.
+     *
+     * The value travels out through Google as {@code state} and comes back
+     * attacker-controllable, so an unchecked one would forward a browser that has
+     * just been issued a session cookie to any host on the internet.
+     */
     private String resolveRedirectBaseUrl(String redirect) {
-        if (redirect == null || redirect.isBlank()) {
-            return DEFAULT_FRONTEND_BASE_URL;
+        if (redirect == null || redirect.isBlank() || !frontendOrigins.allows(redirect)) {
+            return defaultFrontendBaseUrl;
         }
 
-        String normalizedRedirect = redirect.trim();
-
-        try {
-            URI uri = URI.create(normalizedRedirect);
-            if (uri.getScheme() == null || uri.getHost() == null) {
-                return DEFAULT_FRONTEND_BASE_URL;
-            }
-
-            return stripTrailingSlash(stripTradesPath(normalizedRedirect));
-        } catch (IllegalArgumentException exception) {
-            return DEFAULT_FRONTEND_BASE_URL;
-        }
+        return stripTrailingSlash(stripTradesPath(redirect.trim()));
     }
 
     private String stripTradesPath(String url) {

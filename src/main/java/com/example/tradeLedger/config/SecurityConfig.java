@@ -38,7 +38,11 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/v3/api-docs/**",
                                 "/swagger-ui/**",
-                                "/swagger-ui.html"
+                                "/swagger-ui.html",
+                                // The platform health check is unauthenticated;
+                                // show-details=never keeps it to UP or DOWN.
+                                "/actuator/health",
+                                "/actuator/health/**"
                         ).permitAll()
                         // /error is permitted on purpose. It carries no data of its own -
                         // it renders the status the request already earned. Boot runs this

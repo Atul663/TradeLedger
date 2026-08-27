@@ -1,0 +1,64 @@
+# Render blueprint for the TradeLedger API.
+#
+# Create it from the Render dashboard with New > Blueprint, pointed at this
+# repository. Everything marked `sync: false` is deliberately not in git - Render
+# prompts for those values once, at create time.
+#
+# After the first deploy, take the service URL Render assigns and:
+#   1. add "<service-url>/api/v1/auth/callback" to the Authorized redirect URIs
+#      on the Google OAuth client;
+#   2. point the Vercel frontend at "<service-url>" as its API base URL;
+#   3. set FRONTEND_BASE_URL and CORS_ALLOWED_ORIGINS to the Vercel URL.
+
+databases:
+  - name: tradeledger-db
+    databaseName: tradeledger
+    user: tradeledger
+    plan: free
+
+services:
+  - type: web
+    name: tradeledger-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: oregon
+    healthCheckPath: /actuator/health
+    envVars:
+      # One libpq URL; DatabaseUrl splits it into DB_URL/DB_USER/DB_PASSWORD.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: tradeledger-db
+          property: connectionString
+
+      # Signs the access and refresh JWTs. Rotating it logs everyone out.
+      - key: JWT_SECRET
+        generateValue: true
+
+      # AES key for Gmail token storage - must be exactly 16, 24 or 32 bytes, so
+      # it cannot use generateValue.
+      - key: TOKEN_SECRET
+        sync: false
+
+      # AES-GCM key for broker API credentials at rest:  openssl rand -base64 32
+      - key: CREDENTIAL_ENCRYPTION_KEY
+        sync: false
+
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+
+      # The Vercel deployment. FRONTEND_BASE_URL is where a login with no
+      # ?redirect= lands; CORS_ALLOWED_ORIGINS is both the CORS list and the
+      # allow-list the ?redirect= parameter is checked against, so every origin
+      # the UI is served from belongs in it.
+      - key: FRONTEND_BASE_URL
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+
+      # Only needed behind a custom domain. Left unset it derives from
+      # RENDER_EXTERNAL_URL, which Render injects.
+      # - key: GOOGLE_CALLBACK_URL
+      #   sync: false
